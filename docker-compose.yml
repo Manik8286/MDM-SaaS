@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mdm
+      POSTGRES_PASSWORD: mdm
+      POSTGRES_DB: mdmdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdm"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: sqs,secretsmanager
+      DEFAULT_REGION: ap-south-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack:/var/lib/localstack
+      - ./scripts/localstack_init.sh:/etc/localstack/init/ready.d/init.sh
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mdm:mdm@db:5432/mdmdb
+      AWS_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_COMMAND_QUEUE_URL: http://localstack:4566/000000000000/mdm-commands
+      ENVIRONMENT: development
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./.env:/app/.env:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:
+  localstack:
