@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.db.models import Base, Tenant, User, Device
 from app.core.security import hash_password
 
-DATABASE_URL = "postgresql+asyncpg://mdm:mdm@localhost:5432/mdmdb"
+DATABASE_URL = "postgresql+asyncpg://mdm:mdm@localhost:5433/mdmdb"
 
 TENANT_ID   = "11111111-1111-1111-1111-111111111111"
 USER_ID     = "22222222-2222-2222-2222-222222222222"
