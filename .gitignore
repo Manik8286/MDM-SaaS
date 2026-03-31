@@ -38,3 +38,5 @@ dashboard/.env.production
 .idea/
 .vscode/
 *.swp
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
