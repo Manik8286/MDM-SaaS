@@ -1,0 +1,40 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Certificates & keys
+certs/dev/
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Node / Next.js
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.env
+dashboard/.env.local
+dashboard/.env.production
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
