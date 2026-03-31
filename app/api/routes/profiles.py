@@ -1,13 +1,14 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import Profile, Device, MdmCommand, Tenant
-from app.core.deps import get_current_tenant
+from app.db.models import Profile, Device, MdmCommand, Tenant, User
+from app.core.deps import get_current_tenant, get_current_user
 from app.mdm.apple.profiles import build_psso_profile, PssoProfileOptions
 from app.mdm.apple.commands import make_install_profile_command
+from app.services.audit import write_audit
 
 router = APIRouter(prefix="/profiles")
 
@@ -98,7 +99,9 @@ async def delete_profile(
 @router.post("/psso", status_code=202)
 async def push_psso_profile(
     body: PssoProfileRequest,
+    request: Request,
     tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Build a PSSO .mobileconfig and queue InstallProfile for all enrolled devices."""
@@ -121,6 +124,12 @@ async def push_psso_profile(
         db.add(cmd)
         command_uuids.append(cmd.command_uuid)
 
+    await write_audit(
+        db, tenant.id, "profile.psso_push", "profile",
+        actor_id=user.id,
+        changes={"queued": len(command_uuids), "auth_method": body.auth_method},
+        ip_address=request.client.host if request.client else None,
+    )
     return {"queued": len(command_uuids), "command_uuids": command_uuids}
 
 

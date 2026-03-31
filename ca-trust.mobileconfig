@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadContent</key>
+			<data>
+			MIIFLzCCA5egAwIBAgIQJKEZSnO2mLoDw1sN74gXWTANBgkqhkiG
+			9w0BAQsFADCBrzEeMBwGA1UEChMVbWtjZXJ0IGRldmVsb3BtZW50
+			IENBMUIwQAYDVQQLDDltYW5pa2FuZGFua0BBZG1pbi1UU0lzLU1h
+			Y0Jvb2stUHJvLTYubG9jYWwgKE1hbmlrYW5kYW4gaykxSTBHBgNV
+			BAMMQG1rY2VydCBtYW5pa2FuZGFua0BBZG1pbi1UU0lzLU1hY0Jv
+			b2stUHJvLTYubG9jYWwgKE1hbmlrYW5kYW4gaykwHhcNMjYwMzI4
+			MDY1MzE3WhcNMzYwMzI4MDY1MzE3WjCBrzEeMBwGA1UEChMVbWtj
+			ZXJ0IGRldmVsb3BtZW50IENBMUIwQAYDVQQLDDltYW5pa2FuZGFu
+			a0BBZG1pbi1UU0lzLU1hY0Jvb2stUHJvLTYubG9jYWwgKE1hbmlr
+			YW5kYW4gaykxSTBHBgNVBAMMQG1rY2VydCBtYW5pa2FuZGFua0BB
+			ZG1pbi1UU0lzLU1hY0Jvb2stUHJvLTYubG9jYWwgKE1hbmlrYW5k
+			YW4gaykwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQDU
+			FnfUYplYh8dK3SGA+d/xYm1WU4lGRKhetonq8dvf7TJPNLik3r5d
+			ztx8vpfMTkf97otc1/8wmY67cJMOH7Yjgse70fXSSznyfRqH2nsO
+			JSStkFDqUf+LXJYWc9nwt+GWECYxzEeTLERm3QbM/BbIKpf5bu+a
+			yVfs7VBFSv5Ll7HmztxNqjHVP0HFS3Lq+aNcr85jPgn7aADOHdke
+			9oZKLWF/HUvpUYRlJ/eti/PVBe1oaHotw48SmrOSf4GN7Zcp6I2A
+			2G6REZrz51peQnQmT8tl5zP2/E/xXXsuuH6E8VXZYmuBQel5mh2y
+			qLoM4rD9v32+fQcGiUVJcqmYbniuFhIFGRWVpIyHPIDGbPb1eVsw
+			bQvr+2tDKhV2UNaLAV9t8udTdzoIHr9UreqgrT5uphra56NxpH52
+			xTOfmyudB0nTEdkJ6c6m54GiO3xx+ca+zgdgcLzjnnekpDV21WD4
+			ozZP4dx53gDqaYhLXSAdJtdgS2K67OsKu5KYR1CMIrECAwEAAaNF
+			MEMwDgYDVR0PAQH/BAQDAgIEMBIGA1UdEwEB/wQIMAYBAf8CAQAw
+			HQYDVR0OBBYEFDcNYJ2Z+zMvNLfcCLZl2txfIc3BMA0GCSqGSIb3
+			DQEBCwUAA4IBgQAMVb6gzuNYigfMOWEjW8ckAxXCmX7oT2lIp3Qs
+			hot6Phq56lovlhj2gVqJPlqZTP74PmaBQhFywpQtx5tlYdKeRdVg
+			dQmlJT2zy2dW69cc0yuzjYVXPHELaOsaUwIB6Kw9hoQu1jJRwVXh
+			/VKRlpBkthvacI8mIL+dbQ5o2gKebwejRewvOlH/Cpxr+r92GXLE
+			CovsV3zAztYnPr0+dol758NwFBzmxESzqstHdY4vBNQk19VvZnN+
+			AIuZtA1HMDp9Ld5XEDUx+J56booM+uczsnPRqE+MNMGKN8+Kn5TI
+			EBuO1+QL8quQttDdaEiwLelxClQbwSPV/ncuMCA7MtkOSYH9gDjk
+			mwnlavV1wLz2UfGrXNvinhdseSKB6i1vqOGX6XXyflt6zhsXUJuz
+			gATP1P1uD1CCtvMBbqs9OH60lA5b4y5DIMNmkSwrAmV4cSVvotBw
+			zVn8sYlYaH0I3WewSUcURecfNIseWS40rAbe7emnlxmGFnx7PMbi
+			yd9VBz0=
+			</data>
+			<key>PayloadDisplayName</key>
+			<string>MDM Dev Root CA</string>
+			<key>PayloadIdentifier</key>
+			<string>com.mdmsaas.ca.trust.cert</string>
+			<key>PayloadType</key>
+			<string>com.apple.security.root</string>
+			<key>PayloadUUID</key>
+			<string>dc634618-710c-4af1-996e-d5de473ed901</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Trusts the local MDM development CA</string>
+	<key>PayloadDisplayName</key>
+	<string>MDM Dev CA Trust</string>
+	<key>PayloadIdentifier</key>
+	<string>com.mdmsaas.ca.trust</string>
+	<key>PayloadScope</key>
+	<string>System</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>ba46ec2e-ea4b-423b-a259-0c58e9e04372</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>

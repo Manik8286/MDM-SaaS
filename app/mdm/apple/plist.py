@@ -136,9 +136,16 @@ def encode_command_plist(command_type: str, command_uuid: str, params: dict | No
     Build a plist command body to send to device.
     Format: { CommandUUID: ..., Command: { RequestType: ..., ...params } }
     """
+    import base64
     command: dict[str, Any] = {"RequestType": command_type}
     if params:
-        command.update(params)
+        # InstallProfile: Payload must be <data> bytes, not a base64 string
+        if command_type == "InstallProfile" and "Payload" in params:
+            p = dict(params)
+            p["Payload"] = base64.b64decode(p["Payload"])
+            command.update(p)
+        else:
+            command.update(params)
     return plistlib.dumps({"CommandUUID": command_uuid, "Command": command})
 
 

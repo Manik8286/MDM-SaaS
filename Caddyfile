@@ -1,0 +1,4 @@
+https://192.168.64.1 {
+    tls /Users/manikandank/Downloads/mdm-saas/192.168.64.1.pem /Users/manikandank/Downloads/mdm-saas/192.168.64.1-key.pem
+    reverse_proxy localhost:8000
+}

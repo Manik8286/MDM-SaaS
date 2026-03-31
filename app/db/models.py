@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Boolean, ForeignKey, Text, DateTime, func
+from sqlalchemy import String, Boolean, Integer, ForeignKey, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -73,9 +73,18 @@ class Device(Base):
     psso_status: Mapped[str] = mapped_column(String(50), default="not_configured")
     enrolled_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_checkin: Mapped[datetime | None] = mapped_column(DateTime)
+    # Security / compliance fields (populated from DeviceInformation)
+    is_encrypted: Mapped[bool | None] = mapped_column(Boolean)
+    is_supervised: Mapped[bool | None] = mapped_column(Boolean)
+    # Compliance
+    compliance_status: Mapped[str] = mapped_column(String(50), default="unknown")
+    compliance_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="devices")
     commands: Mapped[list["MdmCommand"]] = relationship(back_populates="device")
+    installed_apps: Mapped[list["InstalledApp"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    available_updates: Mapped[list["DeviceUpdate"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    device_users: Mapped[list["DeviceUser"]] = relationship(back_populates="device", cascade="all, delete-orphan")
 
 
 class Profile(Base):
@@ -150,3 +159,55 @@ class AuditLog(Base):
     changes: Mapped[dict | None] = mapped_column(JSONB)
     ip_address: Mapped[str | None] = mapped_column(String(45))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class InstalledApp(Base):
+    __tablename__ = "installed_apps"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    bundle_id: Mapped[str | None] = mapped_column(String(255))
+    version: Mapped[str | None] = mapped_column(String(100))
+    short_version: Mapped[str | None] = mapped_column(String(100))
+    source: Mapped[str | None] = mapped_column(String(100))  # AppStore | Unknown
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    device: Mapped["Device"] = relationship(back_populates="installed_apps")
+
+
+class DeviceUser(Base):
+    __tablename__ = "device_users"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    user_guid: Mapped[str | None] = mapped_column(String(255))
+    short_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_logged_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_secure_token: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    device: Mapped["Device"] = relationship(back_populates="device_users")
+
+
+class DeviceUpdate(Base):
+    __tablename__ = "device_updates"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    product_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    human_readable_name: Mapped[str | None] = mapped_column(String(255))
+    version: Mapped[str | None] = mapped_column(String(100))
+    build: Mapped[str | None] = mapped_column(String(50))
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_config_data_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    restart_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata_url: Mapped[str | None] = mapped_column(Text)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    device: Mapped["Device"] = relationship(back_populates="available_updates")

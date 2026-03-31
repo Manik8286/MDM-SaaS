@@ -36,12 +36,15 @@ async def checkin(request: Request, db: AsyncSession = Depends(get_db)) -> Respo
     if not body:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty body")
 
+    log.info("Checkin body (%d bytes) content-type: %s",
+             len(body), request.headers.get("content-type"))
     try:
         data = decode_checkin_plist(body)
     except ValueError as e:
-        log.warning("Checkin plist parse error: %s", e)
+        log.warning("Checkin plist parse error: %s | raw (first 200): %s", e, body[:200])
         raise HTTPException(status_code=400, detail="Invalid plist")
 
+    log.info("Checkin plist keys: %s", list(data.keys()))
     msg = parse_checkin_message(data)
 
     if isinstance(msg, AuthenticateMessage):
@@ -82,7 +85,7 @@ async def _handle_authenticate(msg: AuthenticateMessage, db: AsyncSession) -> No
             model=msg.model or device.model,
             status="authenticating",
             push_topic=msg.topic,
-            last_checkin=datetime.now(timezone.utc),
+            last_checkin=datetime.utcnow(),
         )
     )
     log.info("Authenticate OK: UDID=%s serial=%s", msg.udid, msg.serial_number)
@@ -100,10 +103,38 @@ async def _handle_token_update(msg: TokenUpdateMessage, db: AsyncSession) -> Non
     device = result.scalar_one_or_none()
 
     if device is None:
-        # First TokenUpdate for a brand new device — create the record
-        log.info("TokenUpdate for new device UDID=%s, creating record", msg.udid)
-        # Tenant resolution for unenrolled devices: attempt via push topic prefix
-        # In production: resolve tenant from enrollment token used during profile install
+        # First TokenUpdate for a brand new device — resolve tenant from push topic
+        # Topic format: com.mdmsaas.mdm.<slug>  or  tenant.apns_push_topic
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.apns_push_topic == msg.topic).limit(1)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            # Fallback: match slug embedded in topic com.mdmsaas.mdm.<slug>
+            slug = msg.topic.split(".")[-1] if msg.topic else None
+            if slug:
+                tenant_result2 = await db.execute(
+                    select(Tenant).where(Tenant.slug == slug).limit(1)
+                )
+                tenant = tenant_result2.scalar_one_or_none()
+        if tenant is None:
+            log.warning("TokenUpdate: cannot resolve tenant for topic %s, skipping", msg.topic)
+            return
+        now = datetime.utcnow()
+        new_device = Device(
+            tenant_id=tenant.id,
+            udid=msg.udid,
+            platform="macos",
+            push_token=push_token_str,
+            push_magic=msg.push_magic,
+            push_topic=msg.topic,
+            unlock_token=unlock_token_str,
+            status="enrolled",
+            enrolled_at=now,
+            last_checkin=now,
+        )
+        db.add(new_device)
+        log.info("TokenUpdate: new device created UDID=%s tenant=%s", msg.udid, tenant.slug)
         return
 
     await db.execute(
@@ -115,8 +146,8 @@ async def _handle_token_update(msg: TokenUpdateMessage, db: AsyncSession) -> Non
             push_topic=msg.topic,
             unlock_token=unlock_token_str,
             status="enrolled",
-            enrolled_at=device.enrolled_at or datetime.now(timezone.utc),
-            last_checkin=datetime.now(timezone.utc),
+            enrolled_at=device.enrolled_at or datetime.utcnow(),
+            last_checkin=datetime.utcnow(),
         )
     )
     log.info("TokenUpdate OK: UDID=%s push_topic=%s", msg.udid, msg.topic)
@@ -131,7 +162,7 @@ async def _handle_checkout(msg: CheckOutMessage, db: AsyncSession) -> None:
             status="unenrolled",
             push_token=None,
             push_magic=None,
-            last_checkin=datetime.now(timezone.utc),
+            last_checkin=datetime.utcnow(),
         )
     )
     log.info("CheckOut: UDID=%s", msg.udid)

@@ -16,12 +16,16 @@ class CommandType(StrEnum):
     REMOVE_PROFILE = "RemoveProfile"
     DEVICE_INFORMATION = "DeviceInformation"
     INSTALLED_APP_LIST = "InstalledApplicationList"
+    AVAILABLE_OS_UPDATES = "AvailableOSUpdates"
+    SCHEDULE_OS_UPDATE_SCAN = "ScheduleOSUpdateScan"
+    SCHEDULE_OS_UPDATE = "ScheduleOSUpdate"
     PROFILE_LIST = "ProfileList"
     DEVICE_LOCK = "DeviceLock"
     ERASE_DEVICE = "EraseDevice"
     RESTART_DEVICE = "RestartDevice"
     SHUTDOWN_DEVICE = "ShutDownDevice"
     INSTALLED_PROFILE_LIST = "CertificateList"
+    USER_LIST = "UserList"
 
 
 def make_install_profile_command(
@@ -93,7 +97,7 @@ def make_device_information_command(
         "UDID", "SerialNumber", "OSVersion", "BuildVersion",
         "ModelName", "Model", "DeviceName", "WiFiMAC",
         "BluetoothMAC", "AvailableDeviceCapacity", "DeviceCapacity",
-        "BatteryLevel", "IsActivationLockEnabled", "IsSupervised",
+        "BatteryLevel", "IsActivationLockEnabled", "IsSupervised", "IsEncrypted",
     ]
     return MdmCommand(
         id=str(uuid.uuid4()),
@@ -115,4 +119,69 @@ def make_restart_command(device_id: str, tenant_id: str) -> MdmCommand:
         command_type=CommandType.RESTART_DEVICE,
         status="queued",
         payload={},
+    )
+
+
+def make_installed_app_list_command(device_id: str, tenant_id: str) -> MdmCommand:
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.INSTALLED_APP_LIST,
+        status="queued",
+        payload={},
+    )
+
+
+def make_available_os_updates_command(device_id: str, tenant_id: str) -> MdmCommand:
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.AVAILABLE_OS_UPDATES,
+        status="queued",
+        payload={},
+    )
+
+
+def make_schedule_os_update_scan_command(device_id: str, tenant_id: str, force: bool = False) -> MdmCommand:
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.SCHEDULE_OS_UPDATE_SCAN,
+        status="queued",
+        payload={"Force": force},
+    )
+
+
+def make_user_list_command(device_id: str, tenant_id: str) -> MdmCommand:
+    """Query the list of local users on a Mac (macOS 10.13+)."""
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.USER_LIST,
+        status="queued",
+        payload={},
+    )
+
+
+def make_schedule_os_update_command(
+    device_id: str,
+    tenant_id: str,
+    updates: list[dict],
+) -> MdmCommand:
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.SCHEDULE_OS_UPDATE,
+        status="queued",
+        payload={"Updates": updates},
     )

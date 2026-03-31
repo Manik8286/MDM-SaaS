@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(caddy status:*)",
+      "Bash(curl -sk https://192.168.64.1/api/v1/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"admin@acme.com\"\",\"\"password\"\":\"\"secret\"\"}')",
+      "Bash(curl -s http://localhost:8000/api/v1/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"admin@acme.com\"\",\"\"password\"\":\"\"secret\"\"}')",
+      "Bash(curl -s http://localhost:8000/EnrollmentServer/Discovery.svc)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(chmod +x /Users/manikandank/Downloads/mdm-saas/scripts/entrypoint.sh)",
+      "Bash(chmod +x /Users/manikandank/Downloads/mdm-saas/scripts/tf_bootstrap.sh /Users/manikandank/Downloads/mdm-saas/scripts/upload_secrets.sh)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform init:*)",
+      "Bash(LC_ALL=C sed -i '' 's/—/-/g' alb.tf ecs.tf rds.tf sqs.tf iam.tf vpc.tf secrets.tf ecr.tf acm.tf outputs.tf)",
+      "Bash(chmod +x /Users/manikandank/Downloads/mdm-saas/scripts/tf_bootstrap.sh /Users/manikandank/Downloads/mdm-saas/scripts/upload_secrets.sh /Users/manikandank/Downloads/mdm-saas/scripts/entrypoint.sh)",
+      "Bash(aws route53domains:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform state:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(terraform force-unlock:*)",
+      "Bash(aws rds:*)",
+      "Bash(aws s3api:*)",
+      "Bash(cat /Users/manikandank/Downloads/mdm-saas/dashboard/app/\\\\\\(dashboard\\\\\\)/enrollment/page.tsx)",
+      "Bash(curl -sf http://localhost:8000/healthz)",
+      "Bash(ls /Users/manikandank/Downloads/mdm-saas/dashboard/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(ls /Users/manikandank/Downloads/mdm-saas/dashboard/app/\\\\\\(dashboard\\\\\\)/devices/)",
+      "Bash(ls /Users/manikandank/Downloads/mdm-saas/dashboard/app/\\\\\\(dashboard\\\\\\)/devices/[id]/)",
+      "Bash(cat -A /Users/manikandank/Downloads/mdm-saas/dashboard/app/\\\\\\(dashboard\\\\\\)/layout.tsx)",
+      "Bash(sed -i '' 's/import { Monitor, Shield, QrCode, LogOut, Settings } from \"\"lucide-react\"\";/import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText } from \"\"lucide-react\"\";/' '/Users/manikandank/Downloads/mdm-saas/dashboard/app/\\(dashboard\\)/layout.tsx')",
+      "Bash(__NEW_LINE_dacbf6d4da0f2b2c__ sed:*)",
+      "Bash(ipconfig getifaddr:*)",
+      "Bash(ngrok version:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(curl -s https://corking-ortho-joye.ngrok-free.dev/healthz)",
+      "Bash(curl -s -X POST https://corking-ortho-joye.ngrok-free.dev/EnrollmentServer/Discovery.svc -H \"Content-Type: application/soap+xml\" -d \"<s:Envelope xmlns:s=''''http://schemas.xmlsoap.org/soap/envelope/''''><s:Body/></s:Envelope>\")",
+      "Bash(docker-compose up:*)"
+    ]
+  }
+}

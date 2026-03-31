@@ -39,8 +39,10 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       SQS_COMMAND_QUEUE_URL: http://localstack:4566/000000000000/mdm-commands
       ENVIRONMENT: development
+      MDM_SERVER_URL: ${MDM_SERVER_URL:-http://localhost:8000}
     volumes:
-      - ./certs:/app/certs:ro
+      - ./app:/app/app          # live reload on code changes
+      - ./certs:/app/certs
       - ./.env:/app/.env:ro
     depends_on:
       db:

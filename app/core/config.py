@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     # mTLS CA cert
     mdm_ca_cert_path: str = "./certs/dev/ca.pem"
 
+    # Public base URL of this server (used in enrollment profiles)
+    mdm_server_url: str = "http://localhost:8000"
+
+    # Dashboard public URL (used in OAuth2 redirect after SSO login)
+    dashboard_url: str = "http://localhost:3000"
+
+    # Entra ID OAuth2 (global / fallback — per-tenant values stored in DB)
+    entra_tenant_id: str = ""
+    entra_client_id: str = ""
+    entra_client_secret: str = ""
+    # Redirect URI registered in Azure Portal — must use localhost for http to work
+    # Defaults to localhost:8000 (browser-accessible), separate from mdm_server_url
+    entra_redirect_uri: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
