@@ -33,9 +33,10 @@ WORKDIR /app
 
 # Copy application source and config, then fix ownership in one layer
 COPY app/ app/
-COPY scripts/entrypoint.sh scripts/entrypoint.sh
+COPY scripts/ scripts/
 COPY alembic.ini .
 RUN chmod +x scripts/entrypoint.sh \
+    && mkdir -p /app/uploads/packages \
     && chown -R app:app /app
 
 # Switch to non-root user

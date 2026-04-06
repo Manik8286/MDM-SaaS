@@ -44,6 +44,7 @@ services:
       - ./app:/app/app          # live reload on code changes
       - ./certs:/app/certs
       - ./.env:/app/.env:ro
+      - uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -52,3 +53,4 @@ services:
 volumes:
   pgdata:
   localstack:
+  uploads:

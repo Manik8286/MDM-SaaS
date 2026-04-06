@@ -2,9 +2,12 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { login, setToken } from "@/lib/api";
+import { setToken, setApiUrl, getApiUrl } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://192.168.64.1";
+const ENVIRONMENTS = [
+  { label: "Production", url: "https://mdm.strativon.click" },
+  { label: "Development", url: "http://localhost:8000" },
+];
 
 function MicrosoftIcon() {
   return (
@@ -20,10 +23,18 @@ function MicrosoftIcon() {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [apiUrl, setApiUrlState] = useState(ENVIRONMENTS[0].url);
+
+  useEffect(() => {
+    setApiUrlState(getApiUrl());
+  }, []);
+
+  function handleEnvChange(url: string) {
+    setApiUrlState(url);
+    setApiUrl(url);
+  }
 
   // Handle SSO redirect: /login?token=... or /login?error=...
   useEffect(() => {
@@ -32,6 +43,8 @@ function LoginForm() {
     if (token) {
       setToken(token);
       router.replace("/devices");
+    } else if (err === "not_authorized") {
+      setError("Your Microsoft account is not authorised to access this dashboard. Contact your administrator to be added.");
     } else if (err === "no_tenant") {
       setError("Your Microsoft account is not linked to any MDM tenant. Contact your administrator.");
     } else if (err === "inactive") {
@@ -39,23 +52,9 @@ function LoginForm() {
     }
   }, [searchParams, router]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const { access_token } = await login(email, password);
-      setToken(access_token);
-      router.push("/devices");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function handleMicrosoftLogin() {
-    window.location.href = `${API_BASE}/api/v1/auth/sso/entra/login`;
+    setLoading(true);
+    window.location.href = `${apiUrl}/api/v1/auth/sso/entra/login`;
   }
 
   return (
@@ -66,68 +65,49 @@ function LoginForm() {
           <p className="mt-1 text-sm text-zinc-500">Sign in to manage your devices</p>
         </div>
 
-        {/* Microsoft SSO button */}
-        <button
-          type="button"
-          onClick={handleMicrosoftLogin}
-          className="w-full flex items-center justify-center gap-3 rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors mb-6"
-        >
-          <MicrosoftIcon />
-          Sign in with Microsoft
-        </button>
-
-        <div className="relative mb-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-zinc-200" />
-          </div>
-          <div className="relative flex justify-center text-xs text-zinc-400 bg-white px-2">
-            or use email & password
+        {/* Environment selector */}
+        <div className="mb-6">
+          <label className="block text-xs font-medium text-zinc-500 mb-1.5 uppercase tracking-wide">
+            Environment
+          </label>
+          <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
+            {ENVIRONMENTS.map((env) => (
+              <button
+                key={env.url}
+                type="button"
+                onClick={() => handleEnvChange(env.url)}
+                className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                  apiUrl === env.url
+                    ? "bg-zinc-900 text-white"
+                    : "bg-white text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                {env.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent"
-              placeholder="admin@acme.com"
-            />
-          </div>
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">
+            {error}
+          </p>
+        )}
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent"
-              placeholder="••••••••"
-            />
-          </div>
+        {/* Microsoft SSO — primary and only sign-in method */}
+        <button
+          type="button"
+          onClick={handleMicrosoftLogin}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 rounded-lg bg-[#0078D4] hover:bg-[#106EBE] px-4 py-3 text-sm font-medium text-white transition-colors disabled:opacity-50"
+        >
+          <MicrosoftIcon />
+          {loading ? "Redirecting…" : "Sign in with Microsoft"}
+        </button>
 
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+        <p className="mt-4 text-center text-xs text-zinc-400">
+          Authenticate with your organisation&apos;s Microsoft Entra ID account
+        </p>
       </div>
     </div>
   );

@@ -75,7 +75,7 @@ resource "aws_db_instance" "main" {
 
   storage_encrypted            = true
   backup_retention_period      = 7
-  deletion_protection          = true
+  deletion_protection          = false
   performance_insights_enabled = true
 
   tags = {

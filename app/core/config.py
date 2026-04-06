@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Defaults to localhost:8000 (browser-accessible), separate from mdm_server_url
     entra_redirect_uri: str = ""
 
+    # Notifications — optional webhook URL (Slack/Teams/Discord incoming webhook)
+    notification_webhook_url: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

@@ -1,6 +1,7 @@
 """
 MDM SaaS — FastAPI application entry point.
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -22,6 +23,11 @@ from app.api.routes.enrollment import router as enrollment_router
 from app.api.routes.profiles import router as profiles_router
 from app.api.routes.patch import router as patch_router
 from app.api.routes.audit import router as audit_router
+from app.api.routes.compliance import router as compliance_router
+from app.api.routes.admin_access import router as admin_access_router
+from app.api.routes.agent import router as agent_router
+from app.api.routes.portal import router as portal_router
+from app.api.routes.packages import router as packages_router
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -33,7 +39,13 @@ async def lifespan(app: FastAPI):
     log.info("Starting MDM SaaS API (env=%s)", settings.environment)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    from app.services.auto_revoke import auto_revoke_loop
+    revoke_task = asyncio.create_task(auto_revoke_loop())
+
     yield
+
+    revoke_task.cancel()
     await engine.dispose()
     log.info("API shutdown complete")
 
@@ -49,7 +61,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if not settings.is_production else [],
+    allow_origins=["*"] if not settings.is_production else [settings.dashboard_url, "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,6 +90,11 @@ app.include_router(enrollment_router, prefix="/api/v1", tags=["Enrollment"])
 app.include_router(profiles_router,   prefix="/api/v1", tags=["Profiles"])
 app.include_router(patch_router,      prefix="/api/v1", tags=["Patch"])
 app.include_router(audit_router,      prefix="/api/v1", tags=["Audit"])
+app.include_router(compliance_router,   prefix="/api/v1", tags=["Compliance"])
+app.include_router(admin_access_router, prefix="/api/v1", tags=["Admin Access"])
+app.include_router(agent_router,        prefix="/api/v1", tags=["Agent"])
+app.include_router(portal_router,       prefix="/api/v1", tags=["Portal"])
+app.include_router(packages_router,     prefix="/api/v1", tags=["Packages"])
 
 
 @app.get("/healthz", tags=["Health"])

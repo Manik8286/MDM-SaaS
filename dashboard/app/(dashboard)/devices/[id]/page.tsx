@@ -4,12 +4,12 @@ import { useEffect, useState, use, useRef } from "react";
 import {
   getDevice, lockDevice, eraseDevice, restartDevice, queryDevice,
   getDeviceApps, getDeviceUpdates, getDeviceCompliance, scanDevice, installUpdates,
-  getDeviceUsers, refreshDeviceUsers,
+  getDeviceUsers, refreshDeviceUsers, getAgentToken, pushUsbBlockDevice, removeUsbBlockDevice,
   type Device, type InstalledApp, type DeviceUpdate, type ComplianceStatus, type DeviceUser,
 } from "@/lib/api";
 import {
   ArrowLeft, Lock, Trash2, RefreshCw, Search, Loader2, CheckCircle2,
-  Clock, X, ShieldCheck, ShieldAlert, ShieldOff, Download, Package, Users,
+  Clock, X, ShieldCheck, ShieldAlert, ShieldOff, Download, Package, Users, Terminal, Copy, Check,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -95,7 +95,25 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
   const [toast, setToast] = useState("");
   const [polling, setPolling] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "patch" | "users">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "patch" | "users" | "agent">("overview");
+
+  // Agent tab state
+  const [agentInfo, setAgentInfo] = useState<{ device_id: string; agent_token: string; server_url: string; bootstrap_url: string } | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function loadAgentToken() {
+    setAgentLoading(true);
+    try { setAgentInfo(await getAgentToken(id)); }
+    catch (err: unknown) { showToast(`Error: ${err instanceof Error ? err.message : "unknown"}`); }
+    finally { setAgentLoading(false); }
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   // Users tab state
   const [deviceUsers, setDeviceUsers] = useState<DeviceUser[]>([]);
@@ -261,12 +279,12 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 border-b border-zinc-200">
-        {(["overview", "patch", "users"] as const).map(tab => (
+        {(["overview", "patch", "users", "agent"] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-700"
             }`}>
-            {tab === "overview" ? "Overview" : tab === "patch" ? "Patch & Compliance" : "Users"}
+            {tab === "overview" ? "Overview" : tab === "patch" ? "Patch & Compliance" : tab === "users" ? "Users" : "Agent"}
           </button>
         ))}
       </div>
@@ -315,6 +333,16 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
                 disabled={!!action || polling}
                 className="flex items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50">
                 <Trash2 size={15} /> {action === "Erase" ? "Queuing…" : "Erase Device"}
+              </button>
+              <button onClick={() => { if (confirm("Block USB storage on this device?")) runAction("UsbBlock", () => pushUsbBlockDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50">
+                <ShieldAlert size={15} /> {action === "UsbBlock" ? "Queuing…" : "Block USB"}
+              </button>
+              <button onClick={() => { if (confirm("Remove USB block from this device?")) runAction("UsbUnblock", () => removeUsbBlockDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
+                <ShieldOff size={15} /> {action === "UsbUnblock" ? "Queuing…" : "Remove USB Block"}
               </button>
             </div>
           </div>
@@ -574,7 +602,85 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-500 space-y-2">
             <p className="font-medium text-zinc-700">Managing user privileges</p>
             <p><strong>For Entra ID (cloud) users:</strong> Go to <strong>Settings → Push PSSO Profile</strong> and set Admin Groups to the Entra group whose members should get local admin rights on the Mac.</p>
-            <p><strong>For local accounts:</strong> Apple MDM has no command to list or modify local user privileges. Use a third-party MDM agent (Jamf, Mosyle) or deploy a shell script via MDM if you need to manage local accounts remotely.</p>
+            <p><strong>For local accounts:</strong> Use the <strong>Agent tab</strong> to install the MDM management agent — it enables automatic admin elevation via the Policies page.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Agent tab ── */}
+      {activeTab === "agent" && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-zinc-200 p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Terminal size={15} className="text-zinc-600" />
+              <h2 className="text-sm font-medium text-zinc-900">MDM Management Agent</h2>
+            </div>
+            <p className="text-xs text-zinc-500 mb-5">
+              Installs a lightweight root daemon that polls for jobs every 30s.
+              Once installed, admin elevation and revocation happen automatically — no manual login required.
+            </p>
+
+            {!agentInfo ? (
+              <button onClick={loadAgentToken} disabled={agentLoading}
+                className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50">
+                {agentLoading ? <Loader2 size={14} className="animate-spin" /> : <Terminal size={14} />}
+                {agentLoading ? "Generating…" : "Generate Install Command"}
+              </button>
+            ) : (() => {
+              const jwt = typeof window !== "undefined" ? localStorage.getItem("mdm_token") : "";
+              // Use -G -d to pass auth — avoids ? in the URL (zsh glob) and quotes (smart-quote issues)
+              const oneLiner = `curl -sSLG -d auth=${jwt} ${agentInfo.bootstrap_url} | sudo bash`;
+              return (
+                <div className="space-y-5">
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+                    <p className="font-medium">One-time install — run as admin on the Mac</p>
+                    <p className="mt-0.5">Open Terminal on the Mac while logged in as the admin account and run the command below.</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-zinc-700 mb-1.5">Install command</p>
+                    <div className="relative rounded-lg bg-zinc-900 px-4 py-3 pr-10">
+                      <code className="text-xs text-green-400 font-mono break-all">{oneLiner}</code>
+                      <button onClick={() => copyToClipboard(oneLiner)}
+                        className="absolute top-2 right-2 rounded p-1 hover:bg-zinc-700">
+                        {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} className="text-zinc-400" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-1.5">The command downloads and installs the agent in one step. No pkg file needed.</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-zinc-700 mb-1.5">Verify installation</p>
+                    <div className="rounded-lg bg-zinc-900 px-4 py-3">
+                      <code className="text-xs text-green-400 font-mono whitespace-pre">{`sudo launchctl list | grep mdmsaas\ntail -f /var/log/mdm-agent.log`}</code>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-xs text-blue-800">
+                    <p className="font-medium mb-1">After install</p>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      <li>Go to <strong>Policies</strong> and approve an admin access request</li>
+                      <li>The agent runs <code>dseditgroup</code> automatically within 30 seconds</li>
+                      <li>A UserList refresh confirms the elevation in the Users tab</li>
+                      <li>Revoke works the same way — no manual steps needed</li>
+                    </ul>
+                    <p className="mt-1 font-medium">Share this portal URL with the user:</p>
+                    {(() => {
+                      const portalUrl = `${agentInfo.server_url}/api/v1/portal?token=${agentInfo.agent_token}`;
+                      return (
+                        <div className="mt-1 flex items-center gap-2">
+                          <code className="text-xs break-all">{portalUrl}</code>
+                          <button onClick={() => copyToClipboard(portalUrl)}
+                            className="flex-shrink-0 rounded p-1 hover:bg-blue-100">
+                            {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} className="text-blue-600" />}
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

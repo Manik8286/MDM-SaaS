@@ -130,3 +130,21 @@ resource "aws_secretsmanager_secret_version" "mdm_signing_key" {
     ignore_changes = [secret_string]
   }
 }
+
+resource "aws_secretsmanager_secret" "device_identity_p12" {
+  name        = "${local.common_name}/device-identity-p12"
+  description = "Base64-encoded PKCS12 device identity certificate for enrollment profiles"
+
+  tags = {
+    Name = "${local.common_name}/device-identity-p12"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "device_identity_p12" {
+  secret_id     = aws_secretsmanager_secret.device_identity_p12.id
+  secret_string = "REPLACE_WITH_BASE64_DEVICE_IDENTITY_P12"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

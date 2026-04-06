@@ -30,6 +30,12 @@ if [ -n "${MDM_SIGNING_KEY_B64:-}" ]; then
     echo "[entrypoint] MDM_SIGNING_KEY_PATH set to /tmp/mdm_signing.key"
 fi
 
+if [ -n "${DEVICE_IDENTITY_P12_B64:-}" ]; then
+    echo "${DEVICE_IDENTITY_P12_B64}" | base64 -d > /tmp/device_identity.p12
+    export DEVICE_IDENTITY_P12_PATH=/tmp/device_identity.p12
+    echo "[entrypoint] DEVICE_IDENTITY_P12_PATH set to /tmp/device_identity.p12"
+fi
+
 # ---------------------------------------------------------------------------
 # Reconstruct DATABASE_URL from individual components injected by ECS/Terraform
 # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME must all be present when

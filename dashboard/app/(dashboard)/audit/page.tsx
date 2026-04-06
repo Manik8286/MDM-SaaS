@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { getAuditLogs, type AuditLog } from "@/lib/api";
 import { RefreshCw } from "lucide-react";
 
@@ -144,9 +144,8 @@ export default function AuditPage() {
               </tr>
             ) : (
               logs.map((l) => (
-                <>
+                <React.Fragment key={l.id}>
                   <tr
-                    key={l.id}
                     className="hover:bg-zinc-50 transition-colors cursor-pointer"
                     onClick={() => setExpanded(expanded === l.id ? null : l.id)}
                   >
@@ -183,7 +182,7 @@ export default function AuditPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))
             )}
           </tbody>

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,9 +8,31 @@ from pydantic import BaseModel
 from app.db.base import get_db
 from app.db.models import Profile, Device, MdmCommand, Tenant, User
 from app.core.deps import get_current_tenant, get_current_user
-from app.mdm.apple.profiles import build_psso_profile, PssoProfileOptions
-from app.mdm.apple.commands import make_install_profile_command
+from app.mdm.apple.profiles import (
+    build_psso_profile, PssoProfileOptions,
+    build_usb_block_profile, build_gatekeeper_profile,
+    usb_block_profile_identifier,
+)
+from app.mdm.apple.commands import make_install_profile_command, make_remove_profile_command
 from app.services.audit import write_audit
+
+log = logging.getLogger(__name__)
+
+
+async def _push_device(device: Device) -> None:
+    if not device.push_token or not device.push_magic or not device.push_topic:
+        log.info("Device %s has no push token — command queued, device will pick up on next poll", device.id)
+        return
+    try:
+        from app.mdm.apple.apns import send_mdm_push
+        await send_mdm_push(
+            push_token_hex=device.push_token,
+            push_magic=device.push_magic,
+            push_topic=device.push_topic,
+        )
+        log.info("APNs push sent to device %s", device.id)
+    except Exception as e:
+        log.warning("APNs push failed for device %s (command still queued): %s", device.id, e)
 
 router = APIRouter(prefix="/profiles")
 
@@ -130,6 +154,71 @@ async def push_psso_profile(
         changes={"queued": len(command_uuids), "auth_method": body.auth_method},
         ip_address=request.client.host if request.client else None,
     )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
+    return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+class GatekeeperPushRequest(BaseModel):
+    allow_identified_developers: bool = True
+
+
+@router.post("/usb-block/push", status_code=202)
+async def push_usb_block(
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push USB storage block profile to all enrolled devices."""
+    profile_xml = build_usb_block_profile(tenant)
+    devices_result = await db.execute(
+        select(Device).where(Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    devices = devices_result.scalars().all()
+    command_uuids = []
+    for device in devices:
+        cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+        db.add(cmd)
+        command_uuids.append(cmd.command_uuid)
+    await write_audit(
+        db, tenant.id, "policy.usb_block_push", "policy",
+        actor_id=user.id,
+        changes={"queued": len(command_uuids)},
+        ip_address=request.client.host if request.client else None,
+    )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
+    return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+@router.post("/gatekeeper/push", status_code=202)
+async def push_gatekeeper(
+    body: GatekeeperPushRequest,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push Gatekeeper enforcement profile to all enrolled devices."""
+    profile_xml = build_gatekeeper_profile(tenant, body.allow_identified_developers)
+    devices_result = await db.execute(
+        select(Device).where(Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    devices = devices_result.scalars().all()
+    command_uuids = []
+    for device in devices:
+        cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+        db.add(cmd)
+        command_uuids.append(cmd.command_uuid)
+    await write_audit(
+        db, tenant.id, "policy.gatekeeper_push", "policy",
+        actor_id=user.id,
+        changes={"queued": len(command_uuids), "allow_identified_developers": body.allow_identified_developers},
+        ip_address=request.client.host if request.client else None,
+    )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
     return {"queued": len(command_uuids), "command_uuids": command_uuids}
 
 
@@ -161,4 +250,66 @@ async def push_profile(
         db.add(cmd)
         command_uuids.append(cmd.command_uuid)
 
+    return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+@router.post("/usb-block/push/{device_id}", status_code=202)
+async def push_usb_block_device(
+    device_id: str,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push USB storage block profile to a specific device."""
+    result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id)
+    )
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    profile_xml = build_usb_block_profile(tenant)
+    cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+    db.add(cmd)
+    await write_audit(
+        db, tenant.id, "policy.usb_block_push", "policy",
+        actor_id=user.id,
+        changes={"device_id": device_id, "hostname": device.hostname},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
+    return {"queued": 1, "command_uuids": [cmd.command_uuid]}
+
+
+@router.post("/usb-block/remove/{device_id}", status_code=202)
+async def remove_usb_block_device(
+    device_id: str,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove USB block profile from a specific device."""
+    result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id)
+    )
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    command_uuids = []
+    # Use the deterministic top-level profile identifier — RemoveProfile targets
+    # the outer PayloadIdentifier, not the inner payload identifiers.
+    cmd = make_remove_profile_command(device.id, tenant.id, usb_block_profile_identifier(tenant.id))
+    db.add(cmd)
+    command_uuids.append(cmd.command_uuid)
+
+    await write_audit(
+        db, tenant.id, "policy.usb_block_remove", "policy",
+        actor_id=user.id,
+        changes={"device_id": device_id, "hostname": device.hostname},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
     return {"queued": len(command_uuids), "command_uuids": command_uuids}

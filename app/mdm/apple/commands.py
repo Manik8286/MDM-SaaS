@@ -28,6 +28,23 @@ class CommandType(StrEnum):
     USER_LIST = "UserList"
 
 
+def make_remove_profile_command(
+    device_id: str,
+    tenant_id: str,
+    profile_identifier: str,
+) -> MdmCommand:
+    """Queue a RemoveProfile command for the given PayloadIdentifier."""
+    return MdmCommand(
+        id=str(uuid.uuid4()),
+        device_id=device_id,
+        tenant_id=tenant_id,
+        command_uuid=str(uuid.uuid4()),
+        command_type=CommandType.REMOVE_PROFILE,
+        status="queued",
+        payload={"Identifier": profile_identifier},
+    )
+
+
 def make_install_profile_command(
     device_id: str,
     tenant_id: str,

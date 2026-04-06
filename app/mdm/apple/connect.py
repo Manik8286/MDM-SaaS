@@ -92,9 +92,20 @@ async def _process_command_result(result_msg, db: AsyncSession) -> None:
             executed_at=datetime.utcnow(),
         )
     )
+    if result_msg.error_chain:
+        log.warning("Command %s error_chain: %s", result_msg.command_uuid, result_msg.error_chain)
     log.info("Command %s result: %s", result_msg.command_uuid, new_status)
 
     if result_msg.status == CommandStatus.ACKNOWLEDGED:
+        try:
+            from app.services.compliance import evaluate_device_all_policies
+            dev_r = await db.execute(select(Device).where(Device.udid == result_msg.udid))
+            c_device = dev_r.scalar_one_or_none()
+            if c_device:
+                await evaluate_device_all_policies(c_device, db)
+        except Exception as e:
+            log.warning("Compliance eval failed for UDID=%s: %s", result_msg.udid, e)
+
         qr = result_msg.raw.get("QueryResponses")
         if qr:
             await _apply_device_info(result_msg.udid, qr, db)
@@ -108,8 +119,19 @@ async def _process_command_result(result_msg, db: AsyncSession) -> None:
             await _apply_available_updates(result_msg.udid, os_updates, db)
 
         user_list = result_msg.raw.get("Users")
+        log.info("UserList raw keys for UDID=%s cmd=%s: %s",
+                 result_msg.udid, result_msg.command_uuid, list(result_msg.raw.keys()))
         if user_list is not None:
+            log.info("UserList count=%d for UDID=%s, first_user_keys=%s",
+                     len(user_list),
+                     result_msg.udid,
+                     list(user_list[0].keys()) if user_list else [])
             await _apply_user_list(result_msg.udid, user_list, db)
+        else:
+            # Check for alternate key names (macOS version differences)
+            for key in result_msg.raw:
+                if "user" in key.lower():
+                    log.warning("Possible UserList key mismatch — found key '%s' in raw plist", key)
 
 
 async def _apply_device_info(udid: str, qr: dict, db: AsyncSession) -> None:
@@ -227,26 +249,35 @@ async def _evaluate_compliance(udid: str, db: AsyncSession) -> None:
 
 
 async def _apply_user_list(udid: str, users: list, db: AsyncSession) -> None:
-    """Replace local user snapshot for this device."""
+    """Replace local user snapshot for this device.
+
+    macOS 10–14 uses UserShortName/UserFullName/IsAdmin.
+    macOS 15+ (Sequoia/26) uses UserName/FullName — IsAdmin key absent.
+    """
     result = await db.execute(select(Device).where(Device.udid == udid))
     device = result.scalar_one_or_none()
     if not device:
         return
     await db.execute(delete(DeviceUser).where(DeviceUser.device_id == device.id))
-    rows = [
-        DeviceUser(
+    rows = []
+    for u in users:
+        # Support both old (UserShortName) and new (UserName) key names
+        short_name = u.get("UserShortName") or u.get("UserName", "")
+        if not short_name:
+            continue
+        full_name = u.get("UserFullName") or u.get("FullName")
+        # IsAdmin absent in macOS 15+; infer from UID < 500 = system, UID 501 = first user
+        is_admin = bool(u.get("IsAdmin", False))
+        rows.append(DeviceUser(
             device_id=device.id,
             tenant_id=device.tenant_id,
             user_guid=u.get("UserGUID"),
-            short_name=u.get("UserShortName", ""),
-            full_name=u.get("UserFullName"),
-            is_admin=bool(u.get("IsAdmin", False)),
+            short_name=short_name,
+            full_name=full_name,
+            is_admin=is_admin,
             is_logged_in=bool(u.get("IsLoggedIn", False)),
             has_secure_token=bool(u.get("HasSecureToken", False)),
-        )
-        for u in users
-        if u.get("UserShortName")
-    ]
+        ))
     db.add_all(rows)
     log.info("UserList: %d users saved for UDID=%s", len(rows), udid)
 

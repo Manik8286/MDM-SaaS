@@ -1,4 +1,17 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://192.168.64.1";
+const DEFAULT_API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://192.168.64.1";
+
+function getApiBase(): string {
+  if (typeof window === "undefined") return DEFAULT_API_BASE;
+  return localStorage.getItem("mdm_api_url") || DEFAULT_API_BASE;
+}
+
+export function setApiUrl(url: string) {
+  localStorage.setItem("mdm_api_url", url);
+}
+
+export function getApiUrl(): string {
+  return getApiBase();
+}
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -15,7 +28,7 @@ export function clearToken() {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+  const res = await fetch(`${getApiBase()}/api/v1${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -171,6 +184,160 @@ export async function installUpdates(id: string, product_keys: string[], install
   });
 }
 
+// Policies
+export async function pushUsbBlock() {
+  return request<{ queued: number; command_uuids: string[] }>("/profiles/usb-block/push", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function pushGatekeeper(allow_identified_developers: boolean = true) {
+  return request<{ queued: number; command_uuids: string[] }>("/profiles/gatekeeper/push", {
+    method: "POST",
+    body: JSON.stringify({ allow_identified_developers }),
+  });
+}
+export async function pushUsbBlockDevice(deviceId: string) {
+  return request<{ queued: number; command_uuids: string[] }>(`/profiles/usb-block/push/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function removeUsbBlockDevice(deviceId: string) {
+  return request<{ queued: number; command_uuids: string[] }>(`/profiles/usb-block/remove/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+// Software Requests (admin dashboard)
+export async function getSoftwareRequests(status?: string) {
+  const q = status ? `?status=${status}` : "";
+  return request<SoftwareRequestItem[]>(`/portal/admin/software-requests${q}`);
+}
+export async function approveSoftwareRequest(id: string) {
+  return request<SoftwareRequestItem>(`/portal/admin/software-requests/${id}/approve`, { method: "POST", body: JSON.stringify({}) });
+}
+export async function rejectSoftwareRequest(id: string) {
+  return request<SoftwareRequestItem>(`/portal/admin/software-requests/${id}/reject`, { method: "POST", body: JSON.stringify({}) });
+}
+
+export interface SoftwareRequestItem {
+  id: string;
+  device_id: string;
+  device_hostname: string | null;
+  requester_name: string;
+  software_name: string;
+  software_pkg_url: string | null;
+  reason: string | null;
+  status: string;
+  created_at: string;
+}
+
+// Agent
+export async function getAgentToken(deviceId: string) {
+  return request<{ device_id: string; agent_token: string; server_url: string; bootstrap_url: string }>(
+    `/devices/${deviceId}/agent-token`
+  );
+}
+
+// Admin Access
+export async function getAdminAccessRequests(status?: string) {
+  const q = status ? `?status=${status}` : "";
+  return request<AdminAccessRequest[]>(`/admin-access/requests${q}`);
+}
+export async function createAdminAccessRequest(data: { device_id: string; device_user_id: string; reason?: string; duration_hours?: number }) {
+  return request<AdminAccessRequest>("/admin-access/requests", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+export async function approveAdminAccess(id: string) {
+  return request<AdminAccessRequest>(`/admin-access/requests/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function denyAdminAccess(id: string) {
+  return request<AdminAccessRequest>(`/admin-access/requests/${id}/deny`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function revokeAdminAccess(id: string) {
+  return request<AdminAccessRequest>(`/admin-access/requests/${id}/revoke`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+// Software Packages
+export async function getPackages() {
+  return request<SoftwarePackageItem[]>("/packages");
+}
+export async function uploadPackage(formData: FormData) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("mdm_token") : null;
+  const res = await fetch(`${getApiUrl()}/api/v1/packages`, {
+    method: "POST",
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<SoftwarePackageItem>;
+}
+export async function deletePackage(id: string) {
+  return request<void>(`/packages/${id}`, { method: "DELETE" });
+}
+export function packageDownloadUrl(id: string): string {
+  return `${getApiUrl()}/api/v1/packages/${id}/download`;
+}
+
+export interface SoftwarePackageItem {
+  id: string;
+  name: string;
+  version: string | null;
+  description: string | null;
+  filename: string;
+  file_size: number | null;
+  pkg_type: string;
+  uploaded_at: string;
+}
+
+// Compliance
+export async function getComplianceSummary() {
+  return request<FleetSummary>("/compliance/summary");
+}
+export async function getCompliancePolicies() {
+  return request<CompliancePolicy[]>("/compliance/policies");
+}
+export async function getDeviceCompliance2(deviceId: string) {
+  return request<DeviceComplianceSummary>(`/compliance/devices/${deviceId}`);
+}
+export async function evaluatePolicy(policyId: string) {
+  return request<{ evaluated: number; policy: string }>(`/compliance/policies/${policyId}/evaluate`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function createCompliancePolicy(data: CreatePolicyInput2) {
+  return request<CompliancePolicy>("/compliance/policies", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+export async function updateCompliancePolicy(id: string, data: Partial<CreatePolicyInput2> & { is_active?: boolean }) {
+  return request<CompliancePolicy>(`/compliance/policies/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+export async function deleteCompliancePolicy(id: string) {
+  return request<void>(`/compliance/policies/${id}`, { method: "DELETE" });
+}
+
 // Types
 export interface Device {
   id: string;
@@ -284,4 +451,78 @@ export interface EnrollmentToken {
   reusable: boolean;
   expires_at: string | null;
   enrollment_url: string;
+}
+
+export interface PolicyRules {
+  filevault_required: boolean;
+  firewall_required: boolean;
+  gatekeeper_required: boolean;
+  max_checkin_age_hours: number;
+  critical_updates_allowed: number;
+  psso_required: boolean;
+  screen_lock_required: boolean;
+}
+
+export interface CompliancePolicy {
+  id: string;
+  name: string;
+  framework: string;
+  description: string | null;
+  rules: PolicyRules;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ComplianceResult {
+  id: string;
+  device_id: string;
+  policy_id: string;
+  status: string;
+  passing: string[];
+  failing: string[];
+  unknown: string[];
+  checked_at: string;
+}
+
+export interface DeviceComplianceSummary {
+  device_id: string;
+  hostname: string | null;
+  serial_number: string | null;
+  overall_status: string;
+  policy_results: ComplianceResult[];
+}
+
+export interface FleetSummary {
+  total_devices: number;
+  compliant: number;
+  non_compliant: number;
+  unknown: number;
+  policies: CompliancePolicy[];
+}
+
+export interface AdminAccessRequest {
+  id: string;
+  device_id: string;
+  device_user_id: string;
+  requested_by_id: string;
+  approved_by_id: string | null;
+  status: string;
+  reason: string | null;
+  duration_hours: number;
+  requested_at: string;
+  decided_at: string | null;
+  revoke_at: string | null;
+  revoked_at: string | null;
+  device_hostname: string | null;
+  device_serial: string | null;
+  username: string | null;
+  is_currently_admin: boolean | null;
+  elevation_command: string | null;
+}
+
+export interface CreatePolicyInput2 {
+  name: string;
+  framework: string;
+  description?: string;
+  rules: PolicyRules;
 }

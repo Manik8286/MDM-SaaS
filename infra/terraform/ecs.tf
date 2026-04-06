@@ -98,6 +98,10 @@ resource "aws_ecs_task_definition" "api" {
           name      = "MDM_SIGNING_KEY_B64"
           valueFrom = aws_secretsmanager_secret.mdm_signing_key.arn
         },
+        {
+          name      = "DEVICE_IDENTITY_P12_B64"
+          valueFrom = aws_secretsmanager_secret.device_identity_p12.arn
+        },
       ]
 
       logConfiguration = {
@@ -182,6 +186,10 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name      = "MDM_SIGNING_KEY_B64"
           valueFrom = aws_secretsmanager_secret.mdm_signing_key.arn
+        },
+        {
+          name      = "DEVICE_IDENTITY_P12_B64"
+          valueFrom = aws_secretsmanager_secret.device_identity_p12.arn
         },
       ]
 

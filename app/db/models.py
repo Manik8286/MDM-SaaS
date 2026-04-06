@@ -76,15 +76,21 @@ class Device(Base):
     # Security / compliance fields (populated from DeviceInformation)
     is_encrypted: Mapped[bool | None] = mapped_column(Boolean)
     is_supervised: Mapped[bool | None] = mapped_column(Boolean)
+    firewall_enabled: Mapped[bool | None] = mapped_column(Boolean)
+    gatekeeper_enabled: Mapped[bool | None] = mapped_column(Boolean)
+    screen_lock_enabled: Mapped[bool | None] = mapped_column(Boolean)
     # Compliance
     compliance_status: Mapped[str] = mapped_column(String(50), default="unknown")
     compliance_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Management agent token (per-device, used by mdm_agent.py)
+    agent_token: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="devices")
     commands: Mapped[list["MdmCommand"]] = relationship(back_populates="device")
     installed_apps: Mapped[list["InstalledApp"]] = relationship(back_populates="device", cascade="all, delete-orphan")
     available_updates: Mapped[list["DeviceUpdate"]] = relationship(back_populates="device", cascade="all, delete-orphan")
     device_users: Mapped[list["DeviceUser"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    script_jobs: Mapped[list["ScriptJob"]] = relationship(back_populates="device", cascade="all, delete-orphan")
 
 
 class Profile(Base):
@@ -211,3 +217,112 @@ class DeviceUpdate(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     device: Mapped["Device"] = relationship(back_populates="available_updates")
+
+
+class AdminAccessRequest(Base):
+    __tablename__ = "admin_access_requests"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id"), nullable=False, index=True)
+    device_user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("device_users.id"), nullable=False)
+    requested_by_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    approved_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending|approved|denied|revoked|expired
+    reason: Mapped[str | None] = mapped_column(Text)
+    duration_hours: Mapped[int] = mapped_column(Integer, default=1)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoke_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    device: Mapped["Device"] = relationship(foreign_keys=[device_id])
+    device_user: Mapped["DeviceUser"] = relationship(foreign_keys=[device_user_id])
+    requested_by: Mapped["User"] = relationship(foreign_keys=[requested_by_id])
+    approved_by: Mapped["User | None"] = relationship(foreign_keys=[approved_by_id])
+
+
+class CompliancePolicy(Base):
+    __tablename__ = "compliance_policies"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    framework: Mapped[str] = mapped_column(String(50), default="custom")  # iso27001 | pci_dss | custom
+    description: Mapped[str | None] = mapped_column(Text)
+    rules: Mapped[dict] = mapped_column(JSONB, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    results: Mapped[list["ComplianceResult"]] = relationship(back_populates="policy", cascade="all, delete-orphan")
+
+
+class ComplianceResult(Base):
+    __tablename__ = "compliance_results"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    policy_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("compliance_policies.id", ondelete="CASCADE"), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="unknown")  # compliant | non_compliant | unknown
+    passing: Mapped[list] = mapped_column(JSONB, default=list)
+    failing: Mapped[list] = mapped_column(JSONB, default=list)
+    unknown: Mapped[list] = mapped_column(JSONB, default=list)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    policy: Mapped["CompliancePolicy"] = relationship(back_populates="results")
+
+
+class ScriptJob(Base):
+    __tablename__ = "script_jobs"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id"), nullable=False, index=True)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)  # pending|running|completed|failed
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    stdout: Mapped[str | None] = mapped_column(Text)
+    stderr: Mapped[str | None] = mapped_column(Text)
+    queued_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
+
+    device: Mapped["Device"] = relationship(back_populates="script_jobs", foreign_keys=[device_id])
+
+
+class SoftwarePackage(Base):
+    __tablename__ = "software_packages"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    version: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_size: Mapped[int | None] = mapped_column(Integer)
+    pkg_type: Mapped[str] = mapped_column(String(10), default="pkg")  # pkg | dmg
+    uploaded_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class SoftwareRequest(Base):
+    __tablename__ = "software_requests"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id"), nullable=False, index=True)
+    requester_name: Mapped[str] = mapped_column(String(255), nullable=False)  # local username
+    software_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    software_pkg_url: Mapped[str | None] = mapped_column(Text)  # direct .pkg download URL
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)  # pending|approved|rejected|installing|completed|failed
+    reviewed_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
+    script_job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("script_jobs.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    device: Mapped["Device"] = relationship(foreign_keys=[device_id])

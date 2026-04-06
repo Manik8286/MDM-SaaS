@@ -15,14 +15,23 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(subject: str, tenant_id: str, role: str = "admin") -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {
+def create_access_token(
+    subject: str,
+    tenant_id: str,
+    role: str = "admin",
+    extra: dict | None = None,
+    expire_minutes: int | None = None,
+) -> str:
+    minutes = expire_minutes or settings.access_token_expire_minutes
+    expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    payload: dict = {
         "sub": subject,
         "tenant_id": tenant_id,
         "role": role,
         "exp": expire,
     }
+    if extra:
+        payload.update(extra)
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 

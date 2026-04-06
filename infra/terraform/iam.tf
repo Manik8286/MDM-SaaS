@@ -51,6 +51,7 @@ data "aws_iam_policy_document" "ecs_task_execution_secrets" {
       aws_secretsmanager_secret.apns_key.arn,
       aws_secretsmanager_secret.mdm_signing_cert.arn,
       aws_secretsmanager_secret.mdm_signing_key.arn,
+      aws_secretsmanager_secret.device_identity_p12.arn,
     ]
   }
 }
@@ -107,6 +108,7 @@ data "aws_iam_policy_document" "ecs_task_permissions" {
       aws_secretsmanager_secret.apns_key.arn,
       aws_secretsmanager_secret.mdm_signing_cert.arn,
       aws_secretsmanager_secret.mdm_signing_key.arn,
+      aws_secretsmanager_secret.device_identity_p12.arn,
     ]
   }
 

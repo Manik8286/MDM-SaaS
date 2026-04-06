@@ -1,13 +1,17 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from pydantic import BaseModel
 from app.db.base import get_db
 from app.db.models import Device, MdmCommand, Tenant, User, DeviceUser
 from app.core.deps import get_current_tenant, get_current_user
+from app.core.config import get_settings
+
+settings = get_settings()
 from app.mdm.apple.commands import (
     make_device_lock_command, make_erase_device_command,
     make_restart_command, make_device_information_command,
@@ -236,6 +240,35 @@ async def list_device_users(
         .order_by(DeviceUser.is_admin.desc(), DeviceUser.short_name)
     )
     return result.scalars().all()
+
+
+@router.get("/{device_id}/agent-token")
+async def get_agent_token(
+    device_id: str,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return (and lazily generate) the per-device agent token."""
+    device = await _get_device(device_id, tenant, db)
+    if not device.agent_token:
+        token = str(uuid.uuid4())
+        await db.execute(
+            update(Device)
+            .where(Device.id == device.id)
+            .values(agent_token=token)
+        )
+        await db.flush()
+        device.agent_token = token
+
+    public_url = settings.mdm_server_url.rstrip("/")
+    return {
+        "device_id": device.id,
+        "agent_token": device.agent_token,
+        "server_url": public_url,
+        "bootstrap_url": f"{public_url}/api/v1/agent/bootstrap/{device.id}",
+    }
 
 
 @router.post("/{device_id}/users/refresh", status_code=202)
