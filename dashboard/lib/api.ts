@@ -209,6 +209,12 @@ export async function removeUsbBlockDevice(deviceId: string) {
     body: JSON.stringify({}),
   });
 }
+export async function pushPssoDevice(deviceId: string, authMethod: string = "UserSecureEnclaveKey") {
+  return request<{ queued: number; command_uuid: string }>(`/profiles/psso/push/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({ auth_method: authMethod, enable_create_user_at_login: true }),
+  });
+}
 
 // Software Requests (admin dashboard)
 export async function getSoftwareRequests(status?: string) {

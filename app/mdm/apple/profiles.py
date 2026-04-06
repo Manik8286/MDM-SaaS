@@ -185,6 +185,9 @@ def build_psso_payload(tenant: Tenant, options: PssoProfileOptions) -> dict:
     """
     platform_sso: dict = {
         "AuthenticationMethod": options.auth_method,
+        "EnableCreateUserAtLogin": options.enable_create_user_at_login,
+        "EnableAuthorization": True,
+        "UseSharedDeviceKeys": True,
         "TokenToUserMapping": {
             "AccountName": "preferred_username",
             "FullName": "name",
@@ -204,9 +207,10 @@ def build_psso_payload(tenant: Tenant, options: PssoProfileOptions) -> dict:
         "PayloadDescription": f"Enables SSO with {tenant.name} Microsoft Entra ID",
         "ExtensionIdentifier": MICROSOFT_SSO_EXTENSION_ID,
         "TeamIdentifier": MICROSOFT_TEAM_ID,
-        "Type": "Credential",
+        "Type": "Redirect",
         "Hosts": ENTRA_SSO_HOSTS,
         "URLs": ENTRA_SSO_URLS,
+        "ScreenLockedBehavior": "DoNotHandle",
         "PlatformSSO": platform_sso,
         "ExtensionData": {
             "browser_sso_interaction_enabled": True,
@@ -245,10 +249,15 @@ def build_profile_xml(
     return plistlib.dumps(profile)
 
 
+def psso_profile_identifier(tenant_id: str) -> str:
+    return f"com.mdmsaas.psso.profile.{tenant_id}"
+
+
 def build_psso_profile(tenant: Tenant, options: PssoProfileOptions | None = None) -> bytes:
     """
     Convenience: build a complete PSSO .mobileconfig profile for a tenant.
     Returns unsigned XML bytes.
+    Uses a deterministic identifier so re-pushing replaces the existing profile.
     """
     if options is None:
         options = PssoProfileOptions()
@@ -259,6 +268,7 @@ def build_psso_profile(tenant: Tenant, options: PssoProfileOptions | None = None
         display_name=f"{tenant.name} — Platform SSO",
         description="Enables macOS login with Microsoft Entra ID credentials",
         removal_disallowed=True,
+        identifier=psso_profile_identifier(tenant.id),
     )
 
 

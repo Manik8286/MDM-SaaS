@@ -159,6 +159,42 @@ async def push_psso_profile(
     return {"queued": len(command_uuids), "command_uuids": command_uuids}
 
 
+@router.post("/psso/push/{device_id}", status_code=202)
+async def push_psso_profile_device(
+    device_id: str,
+    body: PssoProfileRequest,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build a PSSO .mobileconfig and queue InstallProfile for a single device."""
+    device_result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    device = device_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found or not enrolled")
+
+    options = PssoProfileOptions(
+        auth_method=body.auth_method,
+        enable_create_user_at_login=body.enable_create_user_at_login,
+        registration_token=body.registration_token,
+        admin_groups=body.admin_groups,
+    )
+    profile_xml = build_psso_profile(tenant, options)
+    cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+    db.add(cmd)
+    await write_audit(
+        db, tenant.id, "profile.psso_push", "profile",
+        actor_id=user.id,
+        changes={"device_id": device_id, "auth_method": body.auth_method},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
+    return {"queued": 1, "command_uuid": cmd.command_uuid}
+
+
 class GatekeeperPushRequest(BaseModel):
     allow_identified_developers: bool = True
 

@@ -4,7 +4,7 @@ import { useEffect, useState, use, useRef } from "react";
 import {
   getDevice, lockDevice, eraseDevice, restartDevice, queryDevice,
   getDeviceApps, getDeviceUpdates, getDeviceCompliance, scanDevice, installUpdates,
-  getDeviceUsers, refreshDeviceUsers, getAgentToken, pushUsbBlockDevice, removeUsbBlockDevice,
+  getDeviceUsers, refreshDeviceUsers, getAgentToken, pushUsbBlockDevice, removeUsbBlockDevice, pushPssoDevice,
   type Device, type InstalledApp, type DeviceUpdate, type ComplianceStatus, type DeviceUser,
 } from "@/lib/api";
 import {
@@ -21,6 +21,23 @@ function Field({ label, value }: { label: string; value: string | null | undefin
       <dt className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</dt>
       <dd className="mt-1 text-sm text-zinc-900">{value ?? "—"}</dd>
     </div>
+  );
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  enrolled: "bg-green-100 text-green-800 border-green-200",
+  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  unenrolled: "bg-zinc-100 text-zinc-600 border-zinc-200",
+  wiped: "bg-red-100 text-red-700 border-red-200",
+  spare: "bg-purple-100 text-purple-700 border-purple-200",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const cls = STATUS_COLORS[status] ?? "bg-zinc-100 text-zinc-600 border-zinc-200";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${cls}`}>
+      {status}
+    </span>
   );
 }
 
@@ -304,7 +321,10 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
               <Field label="OS Version" value={device.os_version} />
               <Field label="Model" value={device.model} />
               <Field label="Platform" value={device.platform} />
-              <Field label="Status" value={device.status} />
+              <div>
+                <dt className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Status</dt>
+                <dd className="mt-1"><StatusBadge status={device.status} /></dd>
+              </div>
               <Field label="PSSO Status" value={device.psso_status} />
               <Field label="Enrolled" value={device.enrolled_at ? new Date(device.enrolled_at).toLocaleString() : null} />
               <Field label="Last Check-in" value={device.last_checkin ? new Date(device.last_checkin).toLocaleString() : null} />
@@ -343,6 +363,11 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
                 disabled={!!action || polling}
                 className="flex items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
                 <ShieldOff size={15} /> {action === "UsbUnblock" ? "Queuing…" : "Remove USB Block"}
+              </button>
+              <button onClick={() => { if (confirm("Push Platform SSO (Entra ID) profile to this device?")) runAction("PushPsso", () => pushPssoDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">
+                <ShieldCheck size={15} /> {action === "PushPsso" ? "Queuing…" : "Push PSSO"}
               </button>
             </div>
           </div>

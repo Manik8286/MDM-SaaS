@@ -97,6 +97,28 @@ async def _process_command_result(result_msg, db: AsyncSession) -> None:
     log.info("Command %s result: %s", result_msg.command_uuid, new_status)
 
     if result_msg.status == CommandStatus.ACKNOWLEDGED:
+        # If this was an EraseDevice command — mark device as wiped immediately.
+        # The device will also send a CheckOut (CheckOutWhenRemoved=true) which
+        # will transition it to 'spare', but marking here ensures it's not shown
+        # as compliant/enrolled even if CheckOut is delayed or missed.
+        cmd_r = await db.execute(
+            select(MdmCommand).where(MdmCommand.command_uuid == result_msg.command_uuid)
+        )
+        cmd_obj = cmd_r.scalar_one_or_none()
+        if cmd_obj and cmd_obj.command_type == "EraseDevice":
+            await db.execute(
+                update(Device)
+                .where(Device.udid == result_msg.udid)
+                .values(
+                    status="wiped",
+                    compliance_status="unknown",
+                    push_token=None,
+                    push_magic=None,
+                )
+            )
+            log.info("EraseDevice acknowledged for UDID=%s — marked wiped", result_msg.udid)
+            return  # skip compliance eval for wiped device
+
         try:
             from app.services.compliance import evaluate_device_all_policies
             dev_r = await db.execute(select(Device).where(Device.udid == result_msg.udid))

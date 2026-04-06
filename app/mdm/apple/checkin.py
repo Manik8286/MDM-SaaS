@@ -154,15 +154,22 @@ async def _handle_token_update(msg: TokenUpdateMessage, db: AsyncSession) -> Non
 
 
 async def _handle_checkout(msg: CheckOutMessage, db: AsyncSession) -> None:
-    """Device is unenrolling — clear push tokens, mark inactive."""
+    """Device is unenrolling — clear push tokens, mark inactive.
+
+    If the device was previously wiped (status=wiped), mark it as spare
+    (available for redeployment). Otherwise mark as unenrolled.
+    """
+    dev_r = await db.execute(select(Device).where(Device.udid == msg.udid))
+    device = dev_r.scalar_one_or_none()
+    new_status = "spare" if device and device.status == "wiped" else "unenrolled"
     await db.execute(
         update(Device)
         .where(Device.udid == msg.udid)
         .values(
-            status="unenrolled",
+            status=new_status,
             push_token=None,
             push_magic=None,
             last_checkin=datetime.utcnow(),
         )
     )
-    log.info("CheckOut: UDID=%s", msg.udid)
+    log.info("CheckOut: UDID=%s → status=%s", msg.udid, new_status)
