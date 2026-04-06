@@ -9,8 +9,8 @@ A production-ready multi-tenant Mobile Device Management (MDM) server built with
 | Category | Capability |
 |----------|-----------|
 | **Enrollment** | Token-based enrollment, signed `.mobileconfig` delivery, APNs push registration |
-| **Device Management** | Lock, erase, restart, query device info, per-device and fleet-wide actions |
-| **PSSO** | Platform SSO with Microsoft Entra ID (Secure Enclave or Password auth) |
+| **Device Management** | Lock, erase, restart, query device info, per-device and fleet-wide actions — erased devices auto-marked `wiped` → `spare` |
+| **PSSO** | Platform SSO with Microsoft Entra ID — auto-pushed on enrollment, per-device or fleet push, Secure Enclave Key (physical Mac) and Password (VM) auth |
 | **Policies** | USB storage block (macOS 12–15+), Gatekeeper enforcement — push/remove per device or fleet |
 | **Patch Management** | Installed app inventory, available OS updates, compliance scan, remote install |
 | **Software Distribution** | Package upload (`.pkg`, `.dmg`, `.zip`), self-service portal, admin approval workflow |
@@ -230,7 +230,8 @@ curl -s https://<your-url>/api/v1/auth/login \
 | POST | `/api/v1/devices/{id}/patch/install` | Install specific updates |
 | POST | `/api/v1/enrollment/tokens` | Create enrollment token |
 | GET | `/api/v1/enrollment/{token}` | Download enrollment profile |
-| POST | `/api/v1/profiles/psso` | Push PSSO (Entra ID SSO) profile to all devices |
+| POST | `/api/v1/profiles/psso` | Push PSSO (Entra ID SSO) profile to all enrolled devices |
+| POST | `/api/v1/profiles/psso/push/{device_id}` | Push PSSO profile to one device |
 | POST | `/api/v1/profiles/usb-block/push` | Push USB block to all devices |
 | POST | `/api/v1/profiles/usb-block/push/{device_id}` | Push USB block to one device |
 | POST | `/api/v1/profiles/usb-block/remove/{device_id}` | Remove USB block from one device |
@@ -293,7 +294,28 @@ Every database query is scoped by `tenant_id`. Tenant is resolved from:
 5. Device executes → returns result → server marks `completed` or `failed`
 
 ### PSSO (Platform Single Sign-On)
-Pushes `com.apple.extensiblesso` payload enabling macOS login with Microsoft Entra ID credentials. Uses Secure Enclave key (passwordless) or Password auth. Requires Microsoft Company Portal installed on device.
+Pushes `com.apple.extensiblesso` payload enabling macOS login with Microsoft Entra ID credentials.
+
+**Auto-enrollment**: PSSO profile is automatically queued and pushed when a new device enrolls — no manual push required.
+
+**Auth methods**:
+- `UserSecureEnclaveKey` — hardware-bound key on physical Mac (T2/M1/M2/M3). Entra account maps to local user, SSO tokens issued at login.
+- `Password` — Entra password synced to local macOS account. Works on VMs without Secure Enclave.
+
+**New joiner flow**:
+1. Admin generates enrollment token → shares URL with new joiner
+2. New joiner installs enrollment profile in Safari
+3. PSSO profile auto-pushed immediately after enrollment
+4. New joiner installs Company Portal → registers with Entra ID
+5. Login window authenticates against Entra — new local account created automatically (`EnableCreateUserAtLogin=true`)
+6. All Microsoft apps (Teams, Outlook, Office) SSO automatically
+
+**Device lifecycle**:
+- Admin erases device from dashboard → status set to `wiped` immediately
+- Device completes wipe → sends CheckOut → status transitions to `spare`
+- `spare` devices are available for redeployment to new joiners
+
+Requires Microsoft Company Portal installed on device (free, no Intune license needed).
 
 ### USB Block Policy
 - **macOS 12–13**: `com.apple.systemuiserver` with `mount-controls` (deny external disks)
@@ -470,8 +492,10 @@ See `infra/terraform/` for full AWS infrastructure code.
 
 ## Tested On
 
-- macOS Sequoia 15.x (Apple Silicon — physical Mac and UTM VM)
+- macOS Sequoia 15.1 (Apple Silicon — UTM VM) — Password PSSO auth
+- macOS Tahoe 26.2 beta (Apple Silicon — physical MacBook Pro) — Secure Enclave Key PSSO auth
 - Apple APNs production endpoint (`api.push.apple.com`)
 - mdmcert.download vendor signing
 - Apple Push Certificates Portal (`identity.apple.com/pushcert`)
-- Microsoft Entra ID PSSO with Company Portal
+- Microsoft Entra ID PSSO with Company Portal (no Intune license required)
+- Browser SSO verified (Safari, Microsoft 365)

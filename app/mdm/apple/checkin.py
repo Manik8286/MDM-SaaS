@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request, Response, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.db.base import get_db
-from app.db.models import Device, Tenant
+from app.db.models import Device, Tenant, MdmCommand
 from app.mdm.apple.plist import (
     decode_checkin_plist, parse_checkin_message,
     AuthenticateMessage, TokenUpdateMessage, CheckOutMessage,
@@ -134,6 +134,8 @@ async def _handle_token_update(msg: TokenUpdateMessage, db: AsyncSession) -> Non
             last_checkin=now,
         )
         db.add(new_device)
+        await db.flush()  # get new_device.id before queuing commands
+        await _queue_psso_profile(new_device, tenant, db)
         log.info("TokenUpdate: new device created UDID=%s tenant=%s", msg.udid, tenant.slug)
         return
 
@@ -151,6 +153,19 @@ async def _handle_token_update(msg: TokenUpdateMessage, db: AsyncSession) -> Non
         )
     )
     log.info("TokenUpdate OK: UDID=%s push_topic=%s", msg.udid, msg.topic)
+
+
+async def _queue_psso_profile(device: Device, tenant: Tenant, db: AsyncSession) -> None:
+    """Queue PSSO profile install automatically on new device enrollment."""
+    try:
+        from app.mdm.apple.profiles import build_psso_profile, PssoProfileOptions
+        from app.mdm.apple.commands import make_install_profile_command
+        profile_xml = build_psso_profile(tenant, PssoProfileOptions())
+        cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+        db.add(cmd)
+        log.info("PSSO profile queued automatically for new device UDID=%s", device.udid)
+    except Exception as e:
+        log.warning("Failed to queue PSSO profile for UDID=%s: %s", device.udid, e)
 
 
 async def _handle_checkout(msg: CheckOutMessage, db: AsyncSession) -> None:
