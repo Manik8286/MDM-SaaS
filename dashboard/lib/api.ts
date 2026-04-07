@@ -215,6 +215,24 @@ export async function pushPssoDevice(deviceId: string, authMethod: string = "Use
     body: JSON.stringify({ auth_method: authMethod, enable_create_user_at_login: true }),
   });
 }
+export async function pushIcloudBlockDevice(deviceId: string) {
+  return request<{ queued: number; command_uuid: string }>(`/profiles/icloud-block/push/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function removeIcloudBlockDevice(deviceId: string) {
+  return request<{ queued: number; command_uuid: string }>(`/profiles/icloud-block/remove/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+export async function pushOneDriveKfmDevice(deviceId: string) {
+  return request<{ queued: number; command_uuid: string }>(`/profiles/onedrive-kfm/push/${deviceId}`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
 
 // Software Requests (admin dashboard)
 export async function getSoftwareRequests(status?: string) {

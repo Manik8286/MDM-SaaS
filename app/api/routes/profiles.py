@@ -12,6 +12,8 @@ from app.mdm.apple.profiles import (
     build_psso_profile, PssoProfileOptions,
     build_usb_block_profile, build_gatekeeper_profile,
     usb_block_profile_identifier,
+    build_icloud_block_profile, icloud_block_profile_identifier,
+    build_onedrive_kfm_profile, onedrive_kfm_profile_identifier,
 )
 from app.mdm.apple.commands import make_install_profile_command, make_remove_profile_command
 from app.services.audit import write_audit
@@ -256,6 +258,159 @@ async def push_gatekeeper(
     for device in devices:
         asyncio.create_task(_push_device(device))
     return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+@router.post("/icloud-block/push", status_code=202)
+async def push_icloud_block(
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push iCloud block profile to all enrolled devices."""
+    profile_xml = build_icloud_block_profile(tenant)
+    devices_result = await db.execute(
+        select(Device).where(Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    devices = devices_result.scalars().all()
+    command_uuids = []
+    for device in devices:
+        cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+        db.add(cmd)
+        command_uuids.append(cmd.command_uuid)
+    await write_audit(
+        db, tenant.id, "policy.icloud_block_push", "policy",
+        actor_id=user.id,
+        changes={"queued": len(command_uuids)},
+        ip_address=request.client.host if request.client else None,
+    )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
+    return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+@router.post("/icloud-block/push/{device_id}", status_code=202)
+async def push_icloud_block_device(
+    device_id: str,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push iCloud block profile to a single device."""
+    device_result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    device = device_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found or not enrolled")
+    profile_xml = build_icloud_block_profile(tenant)
+    cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+    db.add(cmd)
+    await write_audit(
+        db, tenant.id, "policy.icloud_block_push", "policy",
+        actor_id=user.id,
+        changes={"device_id": device_id},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
+    return {"queued": 1, "command_uuid": cmd.command_uuid}
+
+
+@router.post("/icloud-block/remove/{device_id}", status_code=202)
+async def remove_icloud_block_device(
+    device_id: str,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove iCloud block profile from a single device."""
+    device_result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id)
+    )
+    device = device_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    cmd = make_remove_profile_command(device.id, tenant.id, icloud_block_profile_identifier(tenant.id))
+    db.add(cmd)
+    await write_audit(
+        db, tenant.id, "policy.icloud_block_remove", "policy",
+        actor_id=user.id,
+        changes={"device_id": device_id},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
+    return {"queued": 1, "command_uuid": cmd.command_uuid}
+
+
+class OneDriveKFMRequest(BaseModel):
+    entra_tenant_id: str = ""
+
+
+@router.post("/onedrive-kfm/push", status_code=202)
+async def push_onedrive_kfm(
+    body: OneDriveKFMRequest,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push OneDrive KFM profile to all enrolled devices."""
+    entra_tid = body.entra_tenant_id or tenant.entra_tenant_id or ""
+    if not entra_tid:
+        raise HTTPException(status_code=400, detail="Entra tenant ID required for OneDrive KFM")
+    profile_xml = build_onedrive_kfm_profile(tenant, entra_tid)
+    devices_result = await db.execute(
+        select(Device).where(Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    devices = devices_result.scalars().all()
+    command_uuids = []
+    for device in devices:
+        cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+        db.add(cmd)
+        command_uuids.append(cmd.command_uuid)
+    await write_audit(
+        db, tenant.id, "policy.onedrive_kfm_push", "policy",
+        actor_id=user.id,
+        changes={"queued": len(command_uuids)},
+        ip_address=request.client.host if request.client else None,
+    )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
+    return {"queued": len(command_uuids), "command_uuids": command_uuids}
+
+
+@router.post("/onedrive-kfm/push/{device_id}", status_code=202)
+async def push_onedrive_kfm_device(
+    device_id: str,
+    body: OneDriveKFMRequest,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Push OneDrive KFM profile to a single device."""
+    device_result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id, Device.status == "enrolled")
+    )
+    device = device_result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found or not enrolled")
+    entra_tid = body.entra_tenant_id or tenant.entra_tenant_id or ""
+    if not entra_tid:
+        raise HTTPException(status_code=400, detail="Entra tenant ID required for OneDrive KFM")
+    profile_xml = build_onedrive_kfm_profile(tenant, entra_tid)
+    cmd = make_install_profile_command(device.id, tenant.id, profile_xml)
+    db.add(cmd)
+    await write_audit(
+        db, tenant.id, "policy.onedrive_kfm_push", "policy",
+        actor_id=user.id,
+        changes={"device_id": device_id},
+        ip_address=request.client.host if request.client else None,
+    )
+    asyncio.create_task(_push_device(device))
+    return {"queued": 1, "command_uuid": cmd.command_uuid}
 
 
 @router.post("/{profile_id}/push", status_code=202)

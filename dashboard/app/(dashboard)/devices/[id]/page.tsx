@@ -5,6 +5,7 @@ import {
   getDevice, lockDevice, eraseDevice, restartDevice, queryDevice,
   getDeviceApps, getDeviceUpdates, getDeviceCompliance, scanDevice, installUpdates,
   getDeviceUsers, refreshDeviceUsers, getAgentToken, pushUsbBlockDevice, removeUsbBlockDevice, pushPssoDevice,
+  pushIcloudBlockDevice, removeIcloudBlockDevice, pushOneDriveKfmDevice,
   type Device, type InstalledApp, type DeviceUpdate, type ComplianceStatus, type DeviceUser,
 } from "@/lib/api";
 import {
@@ -368,6 +369,21 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
                 disabled={!!action || polling}
                 className="flex items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50">
                 <ShieldCheck size={15} /> {action === "PushPsso" ? "Queuing…" : "Push PSSO"}
+              </button>
+              <button onClick={() => { if (confirm("Block iCloud on this device?")) runAction("BlockiCloud", () => pushIcloudBlockDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
+                <ShieldAlert size={15} /> {action === "BlockiCloud" ? "Queuing…" : "Block iCloud"}
+              </button>
+              <button onClick={() => { if (confirm("Remove iCloud block from this device?")) runAction("RemoveiCloud", () => removeIcloudBlockDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50">
+                <ShieldOff size={15} /> {action === "RemoveiCloud" ? "Queuing…" : "Remove iCloud Block"}
+              </button>
+              <button onClick={() => { if (confirm("Push OneDrive Known Folder Move to this device?\n\nThis redirects Desktop, Documents and Pictures to OneDrive.")) runAction("PushOneDrive", () => pushOneDriveKfmDevice(id)); }}
+                disabled={!!action || polling}
+                className="flex items-center justify-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-3 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+                <Download size={15} /> {action === "PushOneDrive" ? "Queuing…" : "OneDrive KFM"}
               </button>
             </div>
           </div>

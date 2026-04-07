@@ -148,6 +148,101 @@ def build_usb_block_profile(tenant: "Tenant") -> bytes:
     )
 
 
+def icloud_block_profile_identifier(tenant_id: str) -> str:
+    return f"com.mdmsaas.icloud.block.profile.{tenant_id}"
+
+
+def build_icloud_block_profile(tenant: "Tenant") -> bytes:
+    """
+    Block iCloud services on managed Macs.
+    Uses com.apple.applicationaccess to disable iCloud Drive, Photos,
+    Keychain sync, and other iCloud services.
+    Requires supervised device for full enforcement.
+    """
+    payload = {
+        "PayloadType": "com.apple.applicationaccess",
+        "PayloadVersion": 1,
+        "PayloadIdentifier": f"com.mdmsaas.icloud.block.{tenant.id}",
+        "PayloadUUID": str(uuid.uuid4()),
+        "PayloadDisplayName": "iCloud Restrictions",
+        "PayloadDescription": "Disables iCloud services on managed Macs",
+        # iCloud Drive / Documents
+        "allowCloudDocumentSync": False,
+        # iCloud Photos
+        "allowCloudPhotoLibrary": False,
+        # iCloud Keychain
+        "allowCloudKeychainSync": False,
+        # iCloud Mail / Contacts / Calendar / Reminders / Notes / Bookmarks
+        "allowCloudMail": False,
+        "allowCloudAddressBook": False,
+        "allowCloudCalendar": False,
+        "allowCloudReminders": False,
+        "allowCloudNotes": False,
+        "allowCloudBookmarks": False,
+        # iCloud Backup (macOS)
+        "allowManagedAppsCloudSync": False,
+    }
+    return build_profile_xml(
+        tenant=tenant,
+        payload_dicts=[payload],
+        display_name=f"{tenant.name} — iCloud Block",
+        description="Disables iCloud services — use OneDrive for cloud storage",
+        removal_disallowed=True,
+        identifier=icloud_block_profile_identifier(tenant.id),
+    )
+
+
+def onedrive_kfm_profile_identifier(tenant_id: str) -> str:
+    return f"com.mdmsaas.onedrive.kfm.profile.{tenant_id}"
+
+
+def build_onedrive_kfm_profile(tenant: "Tenant", entra_tenant_id: str) -> bytes:
+    """
+    Configure OneDrive Known Folder Move (KFM) — silently redirects
+    Desktop, Documents, and Pictures to OneDrive (like Windows folder redirection).
+
+    Requires:
+    - Microsoft OneDrive installed on device
+    - entra_tenant_id: the Azure AD / Entra tenant ID (from tenant settings)
+
+    Ref: https://learn.microsoft.com/en-us/sharepoint/deploy-and-configure-on-macos
+    """
+    payload = {
+        "PayloadType": "com.apple.ManagedClient.preferences",
+        "PayloadVersion": 1,
+        "PayloadIdentifier": f"com.mdmsaas.onedrive.kfm.{tenant.id}",
+        "PayloadUUID": str(uuid.uuid4()),
+        "PayloadDisplayName": "OneDrive Known Folder Move",
+        "PayloadDescription": "Redirects Desktop, Documents, Pictures to OneDrive",
+        "PayloadContent": {
+            "com.microsoft.OneDrive": {
+                "Forced": {
+                    # Silently opt-in to KFM without user prompt
+                    "KFMSilentOptIn": entra_tenant_id,
+                    # Show notification after KFM completes
+                    "KFMSilentOptInWithNotification": True,
+                    # Block user from opting out of KFM
+                    "KFMBlockOptOut": True,
+                    # Disable personal OneDrive accounts
+                    "DisablePersonalSync": True,
+                    # Auto-sign in with Entra ID (PSSO)
+                    "EnableSSOForApps": True,
+                    # Open at login
+                    "OpenAtLogin": True,
+                },
+            },
+        },
+    }
+    return build_profile_xml(
+        tenant=tenant,
+        payload_dicts=[payload],
+        display_name=f"{tenant.name} — OneDrive KFM",
+        description="Redirects Desktop, Documents, and Pictures to OneDrive",
+        removal_disallowed=True,
+        identifier=onedrive_kfm_profile_identifier(tenant.id),
+    )
+
+
 def build_gatekeeper_payload(tenant_id: str, allow_identified_developers: bool = True) -> dict:
     """
     Enforce Gatekeeper via com.apple.systempolicy.control.
