@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getDevices, queryDevice, type Device } from "@/lib/api";
-import { RefreshCw, ChevronRight, ShieldCheck, ShieldAlert, ShieldOff } from "lucide-react";
+import {
+  getDevices, queryDevice, bulkDeviceAction,
+  type Device,
+} from "@/lib/api";
+import {
+  RefreshCw, ChevronRight, ShieldCheck, ShieldAlert, ShieldOff,
+  Lock, RotateCw, Search, Trash2,
+} from "lucide-react";
 
 const statusColors: Record<string, string> = {
   enrolled: "bg-green-100 text-green-800",
@@ -39,15 +45,21 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+type BulkAction = "query" | "restart" | "lock" | "erase";
+
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [querying, setQuerying] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState("");
 
   async function load() {
     setLoading(true);
     setError("");
+    setSelected(new Set());
     try {
       setDevices(await getDevices());
     } catch (err: unknown) {
@@ -67,6 +79,44 @@ export default function DevicesPage() {
       setQuerying(null);
     }
   }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === devices.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(devices.map((d) => d.id)));
+    }
+  }
+
+  async function handleBulk(action: BulkAction) {
+    if (selected.size === 0) return;
+    if (action === "erase") {
+      if (!confirm(`Erase ${selected.size} device(s)? This cannot be undone.`)) return;
+    }
+    setBulkLoading(true);
+    setBulkMsg("");
+    try {
+      const result = await bulkDeviceAction(action, Array.from(selected));
+      setBulkMsg(`${action}: ${result.queued} command(s) queued`);
+      setSelected(new Set());
+    } catch (err: unknown) {
+      setBulkMsg(err instanceof Error ? err.message : "Bulk action failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  const allSelected = devices.length > 0 && selected.size === devices.length;
+  const someSelected = selected.size > 0 && selected.size < devices.length;
 
   return (
     <div className="p-8">
@@ -91,10 +141,68 @@ export default function DevicesPage() {
         </div>
       )}
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3">
+          <span className="text-sm font-medium text-indigo-800">{selected.size} selected</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={() => handleBulk("query")}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 rounded-md bg-white border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              <Search size={12} /> Query
+            </button>
+            <button
+              onClick={() => handleBulk("restart")}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 rounded-md bg-white border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              <RotateCw size={12} /> Restart
+            </button>
+            <button
+              onClick={() => handleBulk("lock")}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 rounded-md bg-white border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              <Lock size={12} /> Lock
+            </button>
+            <button
+              onClick={() => handleBulk("erase")}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 rounded-md bg-red-600 border border-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <Trash2 size={12} /> Erase
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-zinc-500 hover:text-zinc-700 ml-1"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {bulkMsg && (
+        <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+          {bulkMsg}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-200 bg-zinc-50">
+              <th className="px-4 py-3 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleAll}
+                  className="rounded border-zinc-300 text-indigo-600"
+                />
+              </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider">Device</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider">Serial</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider">OS</th>
@@ -108,15 +216,26 @@ export default function DevicesPage() {
           <tbody className="divide-y divide-zinc-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-zinc-400">Loading…</td>
+                <td colSpan={9} className="px-4 py-12 text-center text-zinc-400">Loading…</td>
               </tr>
             ) : devices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-zinc-400">No devices enrolled yet</td>
+                <td colSpan={9} className="px-4 py-12 text-center text-zinc-400">No devices enrolled yet</td>
               </tr>
             ) : (
               devices.map((d) => (
-                <tr key={d.id} className="hover:bg-zinc-50 transition-colors">
+                <tr
+                  key={d.id}
+                  className={`hover:bg-zinc-50 transition-colors ${selected.has(d.id) ? "bg-indigo-50/40" : ""}`}
+                >
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(d.id)}
+                      onChange={() => toggleSelect(d.id)}
+                      className="rounded border-zinc-300 text-indigo-600"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-zinc-900">{d.hostname ?? d.udid.slice(0, 8)}</div>
                     <div className="text-xs text-zinc-400">{d.model ?? d.platform}</div>

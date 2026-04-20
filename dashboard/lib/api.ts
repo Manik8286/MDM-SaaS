@@ -584,3 +584,149 @@ export function updateUser(id: string, patch: { role?: string; status?: string }
 export function deleteUser(id: string): Promise<void> {
   return request(`/users/${id}`, { method: "DELETE" });
 }
+
+// ── Bulk device actions ────────────────────────────────────────────────────
+
+export interface BulkActionResult {
+  action: string;
+  queued: number;
+  command_uuids: string[];
+}
+
+export function bulkDeviceAction(
+  action: "lock" | "erase" | "restart" | "query",
+  device_ids: string[],
+  pin?: string,
+  message?: string,
+): Promise<BulkActionResult> {
+  return request("/devices/bulk", {
+    method: "POST",
+    body: JSON.stringify({ action, device_ids, pin, message }),
+  });
+}
+
+// ── Device Groups ──────────────────────────────────────────────────────────
+
+export interface DeviceGroupItem {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  member_count: number;
+  created_at: string;
+}
+
+export function listGroups(): Promise<DeviceGroupItem[]> {
+  return request("/groups");
+}
+
+export function createGroup(name: string, description?: string, color?: string): Promise<DeviceGroupItem> {
+  return request("/groups", {
+    method: "POST",
+    body: JSON.stringify({ name, description, color }),
+  });
+}
+
+export function updateGroup(id: string, patch: { name?: string; description?: string; color?: string }): Promise<DeviceGroupItem> {
+  return request(`/groups/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteGroup(id: string): Promise<void> {
+  return request(`/groups/${id}`, { method: "DELETE" });
+}
+
+export function listGroupDevices(groupId: string): Promise<Device[]> {
+  return request(`/groups/${groupId}/devices`);
+}
+
+export function addDevicesToGroup(groupId: string, device_ids: string[]): Promise<{ added: number }> {
+  return request(`/groups/${groupId}/devices`, {
+    method: "POST",
+    body: JSON.stringify({ device_ids }),
+  });
+}
+
+export function removeDeviceFromGroup(groupId: string, deviceId: string): Promise<void> {
+  return request(`/groups/${groupId}/devices/${deviceId}`, { method: "DELETE" });
+}
+
+export function bulkActionGroup(groupId: string, action: string): Promise<BulkActionResult> {
+  return request(`/groups/${groupId}/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+// ── Compliance Export ──────────────────────────────────────────────────────
+
+export function complianceExportUrl(policyId?: string): string {
+  const base = `${getApiUrl()}/api/v1/compliance/export`;
+  const token = typeof window !== "undefined" ? localStorage.getItem("mdm_token") : null;
+  const params = new URLSearchParams();
+  if (policyId) params.set("policy_id", policyId);
+  if (token) params.set("token", token);
+  return params.toString() ? `${base}?${params}` : base;
+}
+
+export async function downloadComplianceReport(policyId?: string): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("mdm_token") : null;
+  const params = new URLSearchParams();
+  if (policyId) params.set("policy_id", policyId);
+  const q = params.toString() ? `?${params}` : "";
+  const res = await fetch(`${getApiUrl()}/api/v1/compliance/export${q}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "compliance_report.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Profile Versions ───────────────────────────────────────────────────────
+
+export interface ProfileVersionItem {
+  id: string;
+  version: number;
+  changed_by_id: string | null;
+  change_note: string | null;
+  created_at: string;
+}
+
+export interface ProfileDiff {
+  profile_id: string;
+  version: number;
+  previous_version: number | null;
+  change_note: string | null;
+  changed_by_id: string | null;
+  created_at: string;
+  diff: {
+    added: Record<string, unknown>;
+    removed: Record<string, unknown>;
+    changed: Record<string, { from: unknown; to: unknown }>;
+  };
+}
+
+export function getProfileVersions(profileId: string): Promise<ProfileVersionItem[]> {
+  return request(`/profiles/${profileId}/versions`);
+}
+
+export function getProfileVersionDiff(profileId: string, version: number): Promise<ProfileDiff> {
+  return request(`/profiles/${profileId}/versions/${version}/diff`);
+}
+
+export function updateProfile(
+  profileId: string,
+  patch: { name?: string; payload?: Record<string, unknown>; change_note?: string },
+): Promise<Profile> {
+  return request(`/profiles/${profileId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}

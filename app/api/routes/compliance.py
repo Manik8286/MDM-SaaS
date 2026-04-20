@@ -9,9 +9,13 @@ DELETE /compliance/policies/{id}       — delete policy
 POST /compliance/policies/{id}/evaluate — re-evaluate all devices now
 GET  /compliance/summary               — fleet-wide compliance summary
 GET  /compliance/devices/{device_id}   — all policy results for one device
+GET  /compliance/export                — CSV export of all compliance results
 """
+import csv
+import io
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -264,6 +268,56 @@ async def fleet_summary(
         non_compliant=non_compliant,
         unknown=unknown,
         policies=policies_result.scalars().all(),
+    )
+
+
+@router.get("/export")
+async def export_compliance_csv(
+    policy_id: str | None = Query(None),
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream a CSV of compliance results — one row per device × policy."""
+    # Build query: join devices + policies + results
+    q = (
+        select(Device, CompliancePolicy, ComplianceResult)
+        .join(ComplianceResult, ComplianceResult.device_id == Device.id)
+        .join(CompliancePolicy, CompliancePolicy.id == ComplianceResult.policy_id)
+        .where(Device.tenant_id == tenant.id, ComplianceResult.tenant_id == tenant.id)
+    )
+    if policy_id:
+        q = q.where(CompliancePolicy.id == policy_id)
+    result = await db.execute(q.order_by(Device.hostname, CompliancePolicy.name))
+    rows = result.all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "hostname", "serial_number", "platform", "os_version",
+        "policy_name", "framework", "status",
+        "passing_rules", "failing_rules", "unknown_rules", "checked_at",
+    ])
+    for device, policy, res in rows:
+        writer.writerow([
+            device.hostname or device.udid[:8],
+            device.serial_number or "",
+            device.platform,
+            device.os_version or "",
+            policy.name,
+            policy.framework,
+            res.status,
+            "|".join(res.passing or []),
+            "|".join(res.failing or []),
+            "|".join(res.unknown or []),
+            res.checked_at.isoformat() if res.checked_at else "",
+        ])
+
+    output.seek(0)
+    filename = f"compliance_report_{tenant.slug}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

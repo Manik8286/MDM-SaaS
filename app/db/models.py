@@ -326,3 +326,44 @@ class SoftwareRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     device: Mapped["Device"] = relationship(foreign_keys=[device_id])
+
+
+class DeviceGroup(Base):
+    __tablename__ = "device_groups"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    color: Mapped[str] = mapped_column(String(20), default="#6366f1")  # UI badge color
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    members: Mapped[list["DeviceGroupMember"]] = relationship(back_populates="group", cascade="all, delete-orphan")
+
+
+class DeviceGroupMember(Base):
+    __tablename__ = "device_group_members"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    group_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("device_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    group: Mapped["DeviceGroup"] = relationship(back_populates="members")
+    device: Mapped["Device"] = relationship()
+
+
+class ProfileVersion(Base):
+    __tablename__ = "profile_versions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    profile_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    payload_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    changed_by_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
+    change_note: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    profile: Mapped["Profile"] = relationship()

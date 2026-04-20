@@ -3,10 +3,10 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import Profile, Device, MdmCommand, Tenant, User
+from app.db.models import Profile, ProfileVersion, Device, MdmCommand, Tenant, User
 from app.core.deps import get_current_tenant, get_current_user
 from app.mdm.apple.profiles import (
     build_psso_profile, PssoProfileOptions,
@@ -57,6 +57,22 @@ class CreateProfileRequest(BaseModel):
     payload: dict = {}
 
 
+class UpdateProfileRequest(BaseModel):
+    name: str | None = None
+    payload: dict | None = None
+    change_note: str | None = None
+
+
+class ProfileVersionResponse(BaseModel):
+    id: str
+    version: int
+    changed_by_id: str | None
+    change_note: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class PssoProfileRequest(BaseModel):
     auth_method: str = "UserSecureEnclaveKey"
     enable_create_user_at_login: bool = True
@@ -77,6 +93,7 @@ async def list_profiles(
 async def create_profile(
     body: CreateProfileRequest,
     tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     profile = Profile(
@@ -88,7 +105,127 @@ async def create_profile(
     )
     db.add(profile)
     await db.flush()
+    # Record initial version snapshot
+    db.add(ProfileVersion(
+        profile_id=profile.id,
+        tenant_id=tenant.id,
+        version=1,
+        payload_snapshot=body.payload,
+        changed_by_id=user.id,
+        change_note="Initial version",
+    ))
     return profile
+
+
+@router.patch("/{profile_id}", response_model=ProfileResponse)
+async def update_profile(
+    profile_id: str,
+    body: UpdateProfileRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Profile).where(Profile.id == profile_id, Profile.tenant_id == tenant.id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if body.name is not None:
+        profile.name = body.name
+    if body.payload is not None:
+        profile.payload = body.payload
+        profile.signed_xml = None  # invalidate cached signed xml
+
+    # Compute next version number
+    version_result = await db.execute(
+        select(func.max(ProfileVersion.version)).where(ProfileVersion.profile_id == profile_id)
+    )
+    current_max = version_result.scalar() or 0
+    db.add(ProfileVersion(
+        profile_id=profile.id,
+        tenant_id=tenant.id,
+        version=current_max + 1,
+        payload_snapshot=profile.payload,
+        changed_by_id=user.id,
+        change_note=body.change_note,
+    ))
+    await db.flush()
+    return profile
+
+
+@router.get("/{profile_id}/versions", response_model=list[ProfileVersionResponse])
+async def list_profile_versions(
+    profile_id: str,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Profile).where(Profile.id == profile_id, Profile.tenant_id == tenant.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    versions_result = await db.execute(
+        select(ProfileVersion)
+        .where(ProfileVersion.profile_id == profile_id, ProfileVersion.tenant_id == tenant.id)
+        .order_by(ProfileVersion.version.desc())
+    )
+    return versions_result.scalars().all()
+
+
+@router.get("/{profile_id}/versions/{version_num}/diff")
+async def diff_profile_version(
+    profile_id: str,
+    version_num: int,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return payload diff between version_num and the previous version."""
+    result = await db.execute(
+        select(Profile).where(Profile.id == profile_id, Profile.tenant_id == tenant.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    versions_result = await db.execute(
+        select(ProfileVersion)
+        .where(
+            ProfileVersion.profile_id == profile_id,
+            ProfileVersion.tenant_id == tenant.id,
+            ProfileVersion.version.in_([version_num, version_num - 1]),
+        )
+        .order_by(ProfileVersion.version)
+    )
+    versions = versions_result.scalars().all()
+    by_ver = {v.version: v for v in versions}
+
+    current = by_ver.get(version_num)
+    if not current:
+        raise HTTPException(status_code=404, detail="Version not found")
+    previous = by_ver.get(version_num - 1)
+
+    prev_payload = previous.payload_snapshot if previous else {}
+    curr_payload = current.payload_snapshot
+
+    added = {k: curr_payload[k] for k in curr_payload if k not in prev_payload}
+    removed = {k: prev_payload[k] for k in prev_payload if k not in curr_payload}
+    changed = {
+        k: {"from": prev_payload[k], "to": curr_payload[k]}
+        for k in curr_payload
+        if k in prev_payload and curr_payload[k] != prev_payload[k]
+    }
+
+    return {
+        "profile_id": profile_id,
+        "version": version_num,
+        "previous_version": version_num - 1 if previous else None,
+        "change_note": current.change_note,
+        "changed_by_id": current.changed_by_id,
+        "created_at": current.created_at,
+        "diff": {"added": added, "removed": removed, "changed": changed},
+    }
 
 
 @router.get("/{profile_id}", response_model=ProfileResponse)

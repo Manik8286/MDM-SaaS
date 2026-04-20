@@ -83,6 +83,13 @@ class EraseRequest(BaseModel):
     pin: str = ""
 
 
+class BulkActionRequest(BaseModel):
+    action: str  # lock | erase | restart | query
+    device_ids: list[str]
+    pin: str | None = None
+    message: str | None = None
+
+
 async def _get_device(device_id: str, tenant: Tenant, db: AsyncSession) -> Device:
     result = await db.execute(
         select(Device).where(Device.id == device_id, Device.tenant_id == tenant.id)
@@ -91,6 +98,54 @@ async def _get_device(device_id: str, tenant: Tenant, db: AsyncSession) -> Devic
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
+
+
+@router.post("/bulk", status_code=202)
+async def bulk_action(
+    body: BulkActionRequest,
+    request: Request,
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.action not in ("lock", "erase", "restart", "query"):
+        raise HTTPException(status_code=400, detail="Invalid action. Must be lock, erase, restart, or query")
+    if not body.device_ids:
+        raise HTTPException(status_code=400, detail="device_ids must not be empty")
+
+    result = await db.execute(
+        select(Device).where(
+            Device.id.in_(body.device_ids),
+            Device.tenant_id == tenant.id,
+        )
+    )
+    devices = result.scalars().all()
+    if not devices:
+        raise HTTPException(status_code=404, detail="No matching devices found")
+
+    command_uuids = []
+    for device in devices:
+        if body.action == "lock":
+            cmd = make_device_lock_command(device.id, tenant.id, pin=body.pin, message=body.message) if device.platform != "windows" else make_windows_lock(device.id, tenant.id)
+        elif body.action == "erase":
+            cmd = make_erase_device_command(device.id, tenant.id, pin=body.pin or "") if device.platform != "windows" else make_windows_wipe(device.id, tenant.id)
+        elif body.action == "restart":
+            cmd = make_restart_command(device.id, tenant.id) if device.platform != "windows" else make_windows_restart(device.id, tenant.id)
+        else:
+            cmd = make_device_information_command(device.id, tenant.id) if device.platform != "windows" else make_windows_query(device.id, tenant.id)
+        db.add(cmd)
+        command_uuids.append(cmd.command_uuid)
+
+    await write_audit(
+        db, tenant.id, f"device.bulk_{body.action}", "device",
+        actor_id=user.id,
+        changes={"device_ids": body.device_ids, "queued": len(command_uuids)},
+        ip_address=request.client.host if request.client else None,
+    )
+    for device in devices:
+        asyncio.create_task(_push_device(device))
+
+    return {"action": body.action, "queued": len(command_uuids), "command_uuids": command_uuids}
 
 
 @router.get("", response_model=list[DeviceResponse])

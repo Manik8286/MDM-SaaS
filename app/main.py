@@ -29,6 +29,7 @@ from app.api.routes.agent import router as agent_router
 from app.api.routes.portal import router as portal_router
 from app.api.routes.packages import router as packages_router
 from app.api.routes.users import router as users_router
+from app.api.routes.groups import router as groups_router
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -97,6 +98,7 @@ app.include_router(agent_router,        prefix="/api/v1", tags=["Agent"])
 app.include_router(portal_router,       prefix="/api/v1", tags=["Portal"])
 app.include_router(packages_router,     prefix="/api/v1", tags=["Packages"])
 app.include_router(users_router,        prefix="/api/v1", tags=["Users"])
+app.include_router(groups_router,       prefix="/api/v1", tags=["Groups"])
 
 
 @app.get("/healthz", tags=["Health"])

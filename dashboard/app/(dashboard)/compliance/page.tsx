@@ -2,10 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import {
-  getComplianceSummary, getCompliancePolicies, evaluatePolicy,
+  getComplianceSummary, getCompliancePolicies, evaluatePolicy, downloadComplianceReport,
   type FleetSummary, type CompliancePolicy,
 } from "@/lib/api";
-import { RefreshCw, ShieldCheck, ShieldAlert, ShieldOff, ChevronDown, ChevronUp, Play } from "lucide-react";
+import { RefreshCw, ShieldCheck, ShieldAlert, ShieldOff, ChevronDown, ChevronUp, Play, Download } from "lucide-react";
 
 const FRAMEWORK_LABELS: Record<string, string> = {
   iso27001: "ISO 27001",
@@ -107,6 +107,7 @@ export default function CompliancePage() {
   const [policies, setPolicies] = useState<CompliancePolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -141,13 +142,22 @@ export default function CompliancePage() {
           <h1 className="text-xl font-semibold text-zinc-900">Compliance</h1>
           <p className="text-sm text-zinc-400 mt-0.5">ISO 27001 &amp; PCI DSS device compliance</p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => { setExporting(true); try { await downloadComplianceReport(); } finally { setExporting(false); } }}
+            disabled={exporting}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <Download size={14} /> {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
