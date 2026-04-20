@@ -51,9 +51,42 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // Auth
 export async function login(email: string, password: string) {
-  return request<{ access_token: string }>("/auth/login", {
+  return request<{ access_token: string; requires_2fa: boolean; temp_token: string | null }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function validate2fa(temp_token: string, totp_code: string) {
+  return request<{ access_token: string }>("/auth/2fa/validate", {
+    method: "POST",
+    body: JSON.stringify({ temp_token, totp_code }),
+  });
+}
+
+export async function logout() {
+  try {
+    await request("/auth/logout", { method: "POST" });
+  } finally {
+    clearToken();
+  }
+}
+
+export async function setup2fa() {
+  return request<{ secret: string; otpauth_url: string; qr_svg: string }>("/auth/2fa/setup");
+}
+
+export async function enable2fa(totp_code: string) {
+  return request<{ enabled: boolean }>("/auth/2fa/enable", {
+    method: "POST",
+    body: JSON.stringify({ totp_code }),
+  });
+}
+
+export async function disable2fa(totp_code: string) {
+  return request<{ enabled: boolean }>("/auth/2fa/disable", {
+    method: "POST",
+    body: JSON.stringify({ totp_code }),
   });
 }
 

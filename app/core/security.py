@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -29,6 +30,7 @@ def create_access_token(
         "tenant_id": tenant_id,
         "role": role,
         "exp": expire,
+        "jti": str(uuid.uuid4()),  # unique token ID — used for revocation
     }
     if extra:
         payload.update(extra)

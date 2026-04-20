@@ -46,6 +46,9 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(50), default="active")
     last_login: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # TOTP 2FA
+    totp_secret: Mapped[str | None] = mapped_column(String(64))   # base32 TOTP secret
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
 
@@ -326,6 +329,17 @@ class SoftwareRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     device: Mapped["Device"] = relationship(foreign_keys=[device_id])
+
+
+class RevokedToken(Base):
+    """JWT blocklist — one row per logged-out token, cleaned up after expiry."""
+    __tablename__ = "revoked_tokens"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    jti: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class DeviceGroup(Base):

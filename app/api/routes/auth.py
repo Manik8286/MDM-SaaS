@@ -1,21 +1,27 @@
 import hashlib
 import hmac
+import io
 import logging
 import secrets
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
+import pyotp
+import qrcode
+import qrcode.image.svg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Cookie
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, Response
 from jose import jwt as jose_jwt
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, verify_password
+from app.core.deps import get_current_user, bearer
 from app.db.base import get_db
-from app.db.models import Tenant, User, Device
+from app.db.models import Tenant, User, Device, RevokedToken
 from app.services.audit import write_audit
 
 log = logging.getLogger(__name__)
@@ -31,6 +37,8 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    requires_2fa: bool = False
+    temp_token: str | None = None
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -41,11 +49,164 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if user.status != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account inactive")
+
+    # If 2FA is enabled, issue a short-lived temp token and prompt for TOTP
+    if user.totp_enabled:
+        temp = create_access_token(
+            subject=user.id,
+            tenant_id=user.tenant_id,
+            role=user.role,
+            extra={"type": "2fa_pending"},
+            expire_minutes=5,
+        )
+        return TokenResponse(access_token="", requires_2fa=True, temp_token=temp)
+
     token = create_access_token(subject=user.id, tenant_id=user.tenant_id, role=user.role)
     await write_audit(
         db, user.tenant_id, "auth.login", "user",
         actor_id=user.id, resource_id=user.id,
         changes={"method": "password"},
+        ip_address=request.client.host if request.client else None,
+    )
+    return TokenResponse(access_token=token)
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    credentials=Depends(bearer),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the current JWT by storing its jti in the blocklist."""
+    from app.core.security import decode_token
+    payload = decode_token(credentials.credentials)
+    jti = payload.get("jti")
+    if jti:
+        exp_ts = payload.get("exp")
+        expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else datetime.now(timezone.utc)
+        db.add(RevokedToken(jti=jti, user_id=user.id, expires_at=expires_at))
+    await write_audit(
+        db, user.tenant_id, "auth.logout", "user",
+        actor_id=user.id, resource_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
+
+
+# ── TOTP 2FA endpoints ────────────────────────────────────────────────────────
+
+class TotpValidateRequest(BaseModel):
+    temp_token: str
+    totp_code: str
+
+
+class TotpEnableRequest(BaseModel):
+    totp_code: str
+
+
+class TotpDisableRequest(BaseModel):
+    totp_code: str
+
+
+@router.get("/2fa/setup")
+async def setup_2fa(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a new TOTP secret (does not activate until /2fa/enable is called)."""
+    secret = pyotp.random_base32()
+    # Store the pending secret on the user (not yet enabled)
+    user.totp_secret = secret
+    await db.flush()
+
+    totp = pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(name=user.email, issuer_name="MDM SaaS")
+
+    # Generate SVG QR code
+    img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgImage)
+    buf = io.BytesIO()
+    img.save(buf)
+    svg_data = buf.getvalue().decode()
+
+    return {"secret": secret, "otpauth_url": uri, "qr_svg": svg_data}
+
+
+@router.post("/2fa/enable")
+async def enable_2fa(
+    body: TotpEnableRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify a TOTP code against the pending secret and activate 2FA."""
+    if not user.totp_secret:
+        raise HTTPException(status_code=400, detail="Call /2fa/setup first")
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(body.totp_code, valid_window=1):
+        raise HTTPException(status_code=400, detail="Invalid TOTP code")
+    user.totp_enabled = True
+    await db.flush()
+    return {"enabled": True}
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    body: TotpDisableRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify TOTP code then disable 2FA."""
+    if not user.totp_enabled or not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA is not enabled")
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(body.totp_code, valid_window=1):
+        raise HTTPException(status_code=400, detail="Invalid TOTP code")
+    user.totp_enabled = False
+    user.totp_secret = None
+    await db.flush()
+    return {"enabled": False}
+
+
+@router.post("/2fa/validate", response_model=TokenResponse)
+async def validate_2fa(
+    body: TotpValidateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a 2fa_pending temp token + TOTP code for a full access token."""
+    from app.core.security import decode_token
+    try:
+        payload = decode_token(body.temp_token)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid or expired temp token")
+
+    if payload.get("type") != "2fa_pending":
+        raise HTTPException(status_code=400, detail="Not a 2FA pending token")
+
+    result = await db.execute(select(User).where(User.id == payload["sub"]))
+    user = result.scalar_one_or_none()
+    if not user or user.status != "active":
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if not user.totp_enabled or not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA not configured for this user")
+
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(body.totp_code, valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid TOTP code")
+
+    # Revoke the temp token immediately
+    jti = payload.get("jti")
+    if jti:
+        from datetime import timezone as tz
+        exp_ts = payload.get("exp")
+        expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else datetime.now(timezone.utc)
+        db.add(RevokedToken(jti=jti, user_id=user.id, expires_at=expires_at))
+
+    token = create_access_token(subject=user.id, tenant_id=user.tenant_id, role=user.role)
+    await write_audit(
+        db, user.tenant_id, "auth.login", "user",
+        actor_id=user.id, resource_id=user.id,
+        changes={"method": "password+totp"},
         ip_address=request.client.host if request.client else None,
     )
     return TokenResponse(access_token=token)

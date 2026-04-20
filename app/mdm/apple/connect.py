@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 from app.db.base import get_db
 from app.db.models import Device, MdmCommand, InstalledApp, DeviceUpdate, DeviceUser
+from app.core.mtls import require_device_cert, DeviceCert
 from app.mdm.apple.plist import (
     decode_checkin_plist, parse_connect_message,
     encode_command_plist, encode_empty_plist,
@@ -35,7 +36,11 @@ router = APIRouter()
 
 
 @router.put("/mdm/apple/connect")
-async def connect(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
+async def connect(
+    request: Request,
+    cert: DeviceCert = Depends(require_device_cert),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
     body = await request.body()
 
     if body:

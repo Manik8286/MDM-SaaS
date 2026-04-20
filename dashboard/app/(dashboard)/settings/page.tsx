@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, type TenantInfo } from "@/lib/api";
-import { Save, Send, CheckCircle, Globe } from "lucide-react";
+import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, setup2fa, enable2fa, disable2fa, type TenantInfo } from "@/lib/api";
+import { Save, Send, CheckCircle, Globe, ShieldCheck, ShieldOff } from "lucide-react";
 
 export default function SettingsPage() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
@@ -27,6 +27,14 @@ export default function SettingsPage() {
   const [pushing, setPushing] = useState(false);
   const [pushResult, setPushResult] = useState<{ queued: number } | null>(null);
   const [pushError, setPushError] = useState("");
+
+  // 2FA state
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string; qr_svg: string } | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpMsg, setTotpMsg] = useState("");
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [disableCode, setDisableCode] = useState("");
 
   useEffect(() => {
     setApiUrlInput(getApiUrl());
@@ -304,6 +312,137 @@ export default function SettingsPage() {
             {pushing ? "Pushing…" : "Push to all enrolled devices"}
           </button>
         </form>
+      </section>
+
+      {/* ── Two-Factor Authentication ────────────────────────────────────── */}
+      <section className="bg-white rounded-xl border border-zinc-200 p-6 mt-6">
+        <h2 className="text-sm font-semibold text-zinc-900 mb-1 flex items-center gap-2">
+          <ShieldCheck size={14} /> Two-Factor Authentication
+        </h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          Protect your account with a TOTP authenticator app (Google Authenticator, Authy, 1Password, etc.).
+        </p>
+
+        {totpMsg && (
+          <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+            {totpMsg}
+          </div>
+        )}
+
+        {totpEnabled ? (
+          <div>
+            <div className="flex items-center gap-2 mb-4 text-sm text-green-700 font-medium">
+              <ShieldCheck size={16} /> 2FA is enabled
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-600 mb-1">Enter TOTP code to disable</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={disableCode}
+                  onChange={(e) => setDisableCode(e.target.value)}
+                  placeholder="000000"
+                  className="w-40 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+                <button
+                  onClick={async () => {
+                    setTotpLoading(true);
+                    try {
+                      await disable2fa(disableCode);
+                      setTotpEnabled(false);
+                      setDisableCode("");
+                      setTotpMsg("2FA has been disabled.");
+                    } catch (e: unknown) {
+                      setTotpMsg(e instanceof Error ? e.message : "Failed to disable 2FA");
+                    } finally {
+                      setTotpLoading(false);
+                    }
+                  }}
+                  disabled={totpLoading || disableCode.length < 6}
+                  className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {totpLoading ? "…" : "Disable 2FA"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : totpSetup ? (
+          <div>
+            <p className="text-xs text-zinc-600 mb-3">
+              Scan this QR code with your authenticator app, then enter the 6-digit code to activate 2FA.
+            </p>
+            <div
+              className="mb-4 w-48 h-48 border border-zinc-200 rounded-lg overflow-hidden bg-white"
+              dangerouslySetInnerHTML={{ __html: totpSetup.qr_svg }}
+            />
+            <p className="text-xs text-zinc-400 font-mono mb-4 break-all">
+              Manual: {totpSetup.secret}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value)}
+                placeholder="000000"
+                className="w-36 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={async () => {
+                  setTotpLoading(true);
+                  try {
+                    await enable2fa(totpCode);
+                    setTotpEnabled(true);
+                    setTotpSetup(null);
+                    setTotpCode("");
+                    setTotpMsg("2FA enabled successfully!");
+                  } catch (e: unknown) {
+                    setTotpMsg(e instanceof Error ? e.message : "Invalid code");
+                  } finally {
+                    setTotpLoading(false);
+                  }
+                }}
+                disabled={totpLoading || totpCode.length < 6}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {totpLoading ? "Activating…" : "Activate 2FA"}
+              </button>
+              <button
+                onClick={() => { setTotpSetup(null); setTotpCode(""); }}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="flex items-center gap-2 mb-4 text-sm text-zinc-500">
+              <ShieldOff size={16} /> 2FA is not enabled
+            </div>
+            <button
+              onClick={async () => {
+                setTotpLoading(true);
+                setTotpMsg("");
+                try {
+                  const data = await setup2fa();
+                  setTotpSetup(data);
+                } catch (e: unknown) {
+                  setTotpMsg(e instanceof Error ? e.message : "Setup failed");
+                } finally {
+                  setTotpLoading(false);
+                }
+              }}
+              disabled={totpLoading}
+              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <ShieldCheck size={14} /> {totpLoading ? "Setting up…" : "Set up 2FA"}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* ── Setup guide ─────────────────────────────────────────────────── */}

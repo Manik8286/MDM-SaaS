@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText, ShieldCheck, Lock, Package, Users, Layers } from "lucide-react";
-import { clearToken } from "@/lib/api";
+import { logout } from "@/lib/api";
 
 const nav = [
   { href: "/devices", label: "Devices", icon: Monitor },
@@ -29,8 +29,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [router]);
 
-  function handleLogout() {
-    clearToken();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 

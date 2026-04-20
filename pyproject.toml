@@ -25,6 +25,8 @@ dependencies = [
     "biplist>=1.0.3",
     "cryptography>=42.0.0",
     "python-multipart>=0.0.9",
+    "pyotp>=2.9.0",
+    "qrcode[pil]>=7.4.0",
 ]
 
 [project.optional-dependencies]

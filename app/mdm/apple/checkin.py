@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.db.base import get_db
 from app.db.models import Device, Tenant, MdmCommand
+from app.core.mtls import require_device_cert, DeviceCert
 from app.mdm.apple.plist import (
     decode_checkin_plist, parse_checkin_message,
     AuthenticateMessage, TokenUpdateMessage, CheckOutMessage,
@@ -31,13 +32,17 @@ router = APIRouter()
 
 
 @router.put("/mdm/apple/checkin")
-async def checkin(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
+async def checkin(
+    request: Request,
+    cert: DeviceCert = Depends(require_device_cert),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
     body = await request.body()
     if not body:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty body")
 
-    log.info("Checkin body (%d bytes) content-type: %s",
-             len(body), request.headers.get("content-type"))
+    log.info("Checkin body (%d bytes) content-type: %s cert_cn=%s validated=%s",
+             len(body), request.headers.get("content-type"), cert.subject_cn, cert.is_validated)
     try:
         data = decode_checkin_plist(body)
     except ValueError as e:
