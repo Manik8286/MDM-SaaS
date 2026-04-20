@@ -44,20 +44,30 @@ log = logging.getLogger(__name__)
 
 
 def _run_migrations() -> None:
-    """Run alembic upgrade head synchronously before the async app starts."""
-    import os
-    from alembic.config import Config as AlembicConfig
-    from alembic import command as alembic_command
+    """
+    Run alembic upgrade head in a subprocess.
 
-    # Resolve alembic.ini relative to the project root (one level above app/)
+    We cannot call alembic_command.upgrade() directly here because env.py uses
+    asyncio.run(), which raises RuntimeError when a loop is already running
+    (FastAPI's lifespan context). A subprocess gets its own clean event loop.
+    """
+    import subprocess
+    import sys
+    import os
+
     ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
-    cfg = AlembicConfig(os.path.abspath(ini_path))
-    try:
-        alembic_command.upgrade(cfg, "head")
-        log.info("Alembic migrations applied")
-    except Exception:
-        log.exception("Alembic migration failed — startup aborted")
-        raise
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", os.path.abspath(ini_path), "upgrade", "head"],
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            log.info("alembic: %s", line)
+    if result.returncode != 0:
+        log.error("Alembic migration failed:\n%s", result.stderr)
+        raise RuntimeError("Alembic migration failed — startup aborted")
+    log.info("Alembic migrations applied")
 
 
 @asynccontextmanager
