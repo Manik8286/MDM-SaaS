@@ -4,9 +4,14 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { setToken, setApiUrl, getApiUrl } from "@/lib/api";
 
+function getDevUrl() {
+  if (typeof window === "undefined") return "http://localhost:8000";
+  return `http://${window.location.hostname}:8000`;
+}
+
 const ENVIRONMENTS = [
   { label: "Production", url: "https://mdm.strativon.click" },
-  { label: "Development", url: "http://localhost:8000" },
+  { label: "Local", url: "" }, // resolved at runtime via getDevUrl()
 ];
 
 function MicrosoftIcon() {
@@ -28,6 +33,8 @@ function LoginForm() {
   const [apiUrl, setApiUrlState] = useState(ENVIRONMENTS[0].url);
 
   useEffect(() => {
+    // Resolve the local dev URL now that window is available
+    ENVIRONMENTS[1].url = getDevUrl();
     setApiUrlState(getApiUrl());
   }, []);
 
@@ -54,7 +61,8 @@ function LoginForm() {
 
   function handleMicrosoftLogin() {
     setLoading(true);
-    window.location.href = `${apiUrl}/api/v1/auth/sso/entra/login`;
+    const origin = encodeURIComponent(window.location.origin);
+    window.location.href = `${apiUrl}/api/v1/auth/sso/entra/login?dashboard_origin=${origin}`;
   }
 
   return (
@@ -73,7 +81,7 @@ function LoginForm() {
           <div className="flex rounded-lg border border-zinc-200 overflow-hidden">
             {ENVIRONMENTS.map((env) => (
               <button
-                key={env.url}
+                key={env.label}
                 type="button"
                 onClick={() => handleEnvChange(env.url)}
                 className={`flex-1 py-2 text-sm font-medium transition-colors ${
@@ -86,6 +94,9 @@ function LoginForm() {
               </button>
             ))}
           </div>
+          <p className="mt-1.5 text-xs text-zinc-400 font-mono truncate">
+            {apiUrl}
+          </p>
         </div>
 
         {error && (

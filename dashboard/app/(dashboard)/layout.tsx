@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText, ShieldCheck, Lock, Package } from "lucide-react";
+import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText, ShieldCheck, Lock, Package, Users } from "lucide-react";
 import { clearToken } from "@/lib/api";
 
 const nav = [
@@ -14,6 +14,7 @@ const nav = [
   { href: "/packages", label: "Packages", icon: Package },
   { href: "/enrollment", label: "Enrollment", icon: QrCode },
   { href: "/audit", label: "Audit Log", icon: ScrollText },
+  { href: "/users", label: "Team", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

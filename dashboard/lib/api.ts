@@ -550,3 +550,37 @@ export interface CreatePolicyInput2 {
   description?: string;
   rules: PolicyRules;
 }
+
+// ── Users ──────────────────────────────────────────────────────────────────
+
+export interface DashboardUser {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  created_at: string;
+}
+
+export function listUsers(): Promise<DashboardUser[]> {
+  return request("/users");
+}
+
+export function createUser(email: string, role: string): Promise<DashboardUser> {
+  return request("/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, role }),
+  });
+}
+
+export function updateUser(id: string, patch: { role?: string; status?: string }): Promise<DashboardUser> {
+  return request(`/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteUser(id: string): Promise<void> {
+  return request(`/users/${id}`, { method: "DELETE" });
+}

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import Device, ScriptJob, Tenant
+from app.db.models import Device, ScriptJob, Tenant, DeviceUser, new_uuid
 from app.core.deps import get_current_tenant, get_current_user
 from app.core.security import decode_token
 from app.core.config import get_settings
@@ -262,3 +262,54 @@ async def post_job_result(
         log.warning("Job %s stderr: %s", job.id, body.stderr[:500])
 
     return {"id": job.id, "status": job.status}
+
+
+# ---------------------------------------------------------------------------
+# Local user reporting — agent sends list of macOS local accounts each poll
+# ---------------------------------------------------------------------------
+
+class AgentUserEntry(BaseModel):
+    short_name: str
+    full_name: str | None = None
+    is_admin: bool = False
+    is_logged_in: bool = False
+    has_secure_token: bool = False
+
+
+@router.post("/users")
+async def report_users(
+    users: list[AgentUserEntry],
+    device: Device = Depends(get_device_by_agent_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Called by the agent each poll cycle with the list of local macOS users.
+    Upserts DeviceUser records so the portal can match Entra logins to devices.
+    """
+    existing_result = await db.execute(
+        select(DeviceUser).where(DeviceUser.device_id == device.id)
+    )
+    existing = {u.short_name: u for u in existing_result.scalars().all()}
+
+    for entry in users:
+        if entry.short_name in existing:
+            u = existing[entry.short_name]
+            u.full_name = entry.full_name or u.full_name
+            u.is_admin = entry.is_admin
+            u.is_logged_in = entry.is_logged_in
+            u.has_secure_token = entry.has_secure_token
+        else:
+            db.add(DeviceUser(
+                id=new_uuid(),
+                tenant_id=device.tenant_id,
+                device_id=device.id,
+                short_name=entry.short_name,
+                full_name=entry.full_name,
+                is_admin=entry.is_admin,
+                is_logged_in=entry.is_logged_in,
+                has_secure_token=entry.has_secure_token,
+            ))
+
+    await db.commit()
+    log.info("Agent user report: %d users on device %s", len(users), device.id)
+    return {"synced": len(users)}

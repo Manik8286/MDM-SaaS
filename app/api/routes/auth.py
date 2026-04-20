@@ -53,18 +53,24 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
 
 # ── Entra ID SSO helpers ──────────────────────────────────────────────────────
 
-def _make_state(nonce: str) -> str:
-    sig = hmac.new(settings.secret_key.encode(), nonce.encode(), hashlib.sha256).hexdigest()
-    return f"{nonce}.{sig}"
+def _make_state(nonce: str, dashboard_origin: str = "") -> str:
+    payload = f"{nonce}|{dashboard_origin}"
+    sig = hmac.new(settings.secret_key.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
 
 
-def _verify_state(state: str) -> bool:
+def _verify_state(state: str) -> tuple[bool, str]:
+    """Returns (valid, dashboard_origin)."""
     try:
-        nonce, sig = state.rsplit(".", 1)
-        expected = hmac.new(settings.secret_key.encode(), nonce.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, expected)
+        payload, sig = state.rsplit(".", 1)
+        expected = hmac.new(settings.secret_key.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False, ""
+        parts = payload.split("|", 1)
+        origin = parts[1] if len(parts) > 1 else ""
+        return True, origin
     except Exception:
-        return False
+        return False, ""
 
 
 def _get_entra_config() -> tuple[str, str, str]:
@@ -83,11 +89,13 @@ def _get_entra_config() -> tuple[str, str, str]:
 # ── GET /auth/sso/entra/login ─────────────────────────────────────────────────
 
 @router.get("/sso/entra/login")
-async def sso_entra_login():
+async def sso_entra_login(request: Request, dashboard_origin: str = Query(default="")):
     """Redirect browser to Microsoft login page."""
     entra_tid, entra_cid, _ = _get_entra_config()
     nonce = secrets.token_urlsafe(16)
-    state = _make_state(nonce)
+    # Embed the caller's dashboard origin in state so callback can redirect back to it
+    origin = dashboard_origin or settings.dashboard_url.rstrip("/")
+    state = _make_state(nonce, origin)
     callback_url = settings.entra_redirect_uri or f"{settings.mdm_server_url.rstrip('/')}/api/v1/auth/sso/entra/callback"
     params = urlencode({
         "client_id": entra_cid,
@@ -112,7 +120,8 @@ async def sso_entra_callback(
     db: AsyncSession = Depends(get_db),
 ):
     """Receive OAuth2 code from Microsoft, exchange for tokens, issue JWT."""
-    if not _verify_state(state):
+    valid, dashboard_origin = _verify_state(state)
+    if not valid:
         raise HTTPException(status_code=400, detail="Invalid state — possible CSRF")
 
     entra_tid, entra_cid, entra_cs = _get_entra_config()
@@ -148,7 +157,8 @@ async def sso_entra_callback(
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
-    dashboard_url = settings.dashboard_url.rstrip("/")
+    # Use the origin embedded in state; fall back to configured DASHBOARD_URL
+    dashboard_url = (dashboard_origin or settings.dashboard_url).rstrip("/")
 
     if not user:
         # Not in the users table — access denied
@@ -169,7 +179,6 @@ async def sso_entra_callback(
         changes={"method": "entra_sso", "email": email},
         ip_address=request.client.host if request.client else None,
     )
-    dashboard_url = settings.dashboard_url.rstrip("/")
     return RedirectResponse(f"{dashboard_url}/login?token={jwt_token}")
 
 

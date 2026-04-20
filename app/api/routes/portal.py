@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import Device, DeviceUser, ScriptJob, SoftwareRequest, SoftwarePackage, AdminAccessRequest, Tenant, User
+from app.db.models import Device, DeviceUser, ScriptJob, SoftwareRequest, SoftwarePackage, AdminAccessRequest, Tenant, User, new_uuid
 from app.core.deps import get_current_tenant, get_current_user, get_portal_session, PortalSession
 from app.core.config import get_settings
 import logging
@@ -134,9 +134,13 @@ async def get_portal_device(
     # short_name is the local macOS username — typically the UPN prefix
     upn_prefix = session.upn.split("@")[0].lower()
 
-    # Find device users matching this UPN
+    # Strategy 1: match short_name == UPN prefix
+    # (works when PSSO creates a new account e.g. UserSecureEnclaveKey mode)
     du_result = await db.execute(
-        select(DeviceUser).where(DeviceUser.short_name == upn_prefix)
+        select(DeviceUser).where(
+            DeviceUser.short_name == upn_prefix,
+            DeviceUser.tenant_id == session.tenant_id,
+        )
     )
     device_users = du_result.scalars().all()
 
@@ -153,18 +157,34 @@ async def get_portal_device(
         if device:
             return device
 
-    # Fallback: return first enrolled device in the tenant
-    # (useful when device users haven't been refreshed yet)
-    fallback = await db.execute(
-        select(Device).where(
-            Device.tenant_id == session.tenant_id,
-            Device.status == "enrolled",
-        ).order_by(Device.last_checkin.desc())
+    # Strategy 2: match the currently logged-in user on any enrolled device
+    # (works when PSSO Password mode reuses an existing local account —
+    #  Entra password syncs to "demopc" account, so UPN prefix != short_name)
+    du_logged_in = await db.execute(
+        select(DeviceUser).where(
+            DeviceUser.tenant_id == session.tenant_id,
+            DeviceUser.is_logged_in == True,
+        )
     )
-    device = fallback.scalars().first()
-    if not device:
-        raise HTTPException(status_code=404, detail="No enrolled device found for your account")
-    return device
+    logged_in_users = du_logged_in.scalars().all()
+
+    if logged_in_users:
+        device_ids = [du.device_id for du in logged_in_users]
+        dev_result = await db.execute(
+            select(Device).where(
+                Device.id.in_(device_ids),
+                Device.tenant_id == session.tenant_id,
+                Device.status == "enrolled",
+            ).order_by(Device.last_checkin.desc())
+        )
+        device = dev_result.scalars().first()
+        if device:
+            return device
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"No enrolled device found for '{upn_prefix}'. Make sure you are logged into this Mac with your Entra account and the MDM agent has checked in."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +405,7 @@ async function submitSoftware() {{
     await api("/software-requests", {{method:"POST", body: JSON.stringify({{
       requester_name: user,
       software_id: selectedSoftware?.id||undefined,
-      software_name: selectedSoftware?undefined:name,
+      software_name: name,
       reason: reason||undefined
     }})}});
     toast("Request submitted! An admin will review shortly.");
@@ -578,10 +598,23 @@ async def create_software_request(
     device: Device = Depends(get_portal_device),
     db: AsyncSession = Depends(get_db),
 ):
-    # Resolve from catalog if software_id provided
+    # Resolve from catalog or uploaded packages if software_id provided
     catalog_item = None
     if body.software_id:
-        catalog_item = next((s for s in SOFTWARE_CATALOG if s["id"] == body.software_id), None)
+        if body.software_id.startswith("pkg_"):
+            # Uploaded package — look up in DB
+            pkg_id = body.software_id[4:]
+            pkg_result = await db.execute(
+                select(SoftwarePackage).where(
+                    SoftwarePackage.id == pkg_id,
+                    SoftwarePackage.tenant_id == device.tenant_id,
+                )
+            )
+            pkg = pkg_result.scalar_one_or_none()
+            if pkg:
+                catalog_item = {"name": pkg.name, "pkg_url": None}
+        else:
+            catalog_item = next((s for s in SOFTWARE_CATALOG if s["id"] == body.software_id), None)
 
     software_name = (catalog_item["name"] if catalog_item else body.software_name) or ""
     if not software_name:
@@ -658,7 +691,8 @@ async def create_portal_admin_request(
     device: Device = Depends(get_portal_device),
     db: AsyncSession = Depends(get_db),
 ):
-    # Match device user by UPN prefix (macOS short_name) from the session
+    # Match device user by UPN prefix, or fall back to the currently logged-in user
+    # (PSSO Password mode reuses existing local account — UPN prefix != short_name)
     upn_prefix = session.upn.split("@")[0].lower()
     user_result = await db.execute(
         select(DeviceUser).where(
@@ -667,11 +701,19 @@ async def create_portal_admin_request(
         )
     )
     device_user = user_result.scalar_one_or_none()
+
     if not device_user:
-        raise HTTPException(
-            status_code=404,
-            detail=f"macOS user '{upn_prefix}' not found on this device. Ask your admin to run a UserList refresh."
+        # Fallback: use the currently logged-in user on this device
+        logged_in_result = await db.execute(
+            select(DeviceUser).where(
+                DeviceUser.device_id == device.id,
+                DeviceUser.is_logged_in == True,
+            )
         )
+        device_user = logged_in_result.scalars().first()
+
+    if not device_user:
+        raise HTTPException(status_code=404, detail="Could not identify your macOS account. Ask your admin to run a UserList refresh.")
 
     if device_user.is_admin:
         raise HTTPException(status_code=400, detail="You already have admin access")
@@ -679,11 +721,22 @@ async def create_portal_admin_request(
     if not 1 <= body.duration_hours <= 72:
         raise HTTPException(status_code=400, detail="duration_hours must be 1–72")
 
+    # Look up the portal User record by email for the FK (requested_by_id → users.id)
+    requester_result = await db.execute(
+        select(User).where(
+            User.email == session.email.lower(),
+            User.tenant_id == device.tenant_id,
+        )
+    )
+    requester = requester_result.scalar_one_or_none()
+    if not requester:
+        raise HTTPException(status_code=404, detail="Your account is not registered. Contact your administrator.")
+
     req = AdminAccessRequest(
         tenant_id=device.tenant_id,
         device_id=device.id,
         device_user_id=device_user.id,
-        requested_by_id=device_user.id,  # self-request
+        requested_by_id=requester.id,
         reason=body.reason,
         duration_hours=body.duration_hours,
     )

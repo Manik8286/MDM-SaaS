@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getTenant, updateTenant, pushPsso, type TenantInfo } from "@/lib/api";
-import { Save, Send, CheckCircle } from "lucide-react";
+import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, type TenantInfo } from "@/lib/api";
+import { Save, Send, CheckCircle, Globe } from "lucide-react";
 
 export default function SettingsPage() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
@@ -15,6 +15,10 @@ export default function SettingsPage() {
   const [entraTenantId, setEntraTenantId] = useState("");
   const [entraClientId, setEntraClientId] = useState("");
 
+  // API URL
+  const [apiUrlInput, setApiUrlInput] = useState("");
+  const [apiUrlSaved, setApiUrlSaved] = useState(false);
+
   // PSSO push form
   const [authMethod, setAuthMethod] = useState("UserSecureEnclaveKey");
   const [createUser, setCreateUser] = useState(true);
@@ -23,6 +27,10 @@ export default function SettingsPage() {
   const [pushing, setPushing] = useState(false);
   const [pushResult, setPushResult] = useState<{ queued: number } | null>(null);
   const [pushError, setPushError] = useState("");
+
+  useEffect(() => {
+    setApiUrlInput(getApiUrl());
+  }, []);
 
   useEffect(() => {
     getTenant()
@@ -94,6 +102,57 @@ export default function SettingsPage() {
           {error}
         </div>
       )}
+
+      {/* ── API Server URL ───────────────────────────────────────────────── */}
+      <section className="bg-white rounded-xl border border-zinc-200 p-6 mb-6">
+        <h2 className="text-sm font-semibold text-zinc-900 mb-1 flex items-center gap-2">
+          <Globe size={14} /> API Server
+        </h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          Change this if you are accessing the dashboard from a different machine on the same network.
+          Use <code className="bg-zinc-100 px-1 rounded">http://&lt;host-ip&gt;:8000</code>.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={apiUrlInput}
+            onChange={(e) => setApiUrlInput(e.target.value)}
+            className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-mono text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setApiUrl(apiUrlInput);
+              setApiUrlSaved(true);
+              setTimeout(() => setApiUrlSaved(false), 2000);
+            }}
+            className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
+          >
+            <Save size={14} />
+            Apply
+          </button>
+        </div>
+        {apiUrlSaved && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-green-600">
+            <CheckCircle size={12} /> Saved — reload the page to re-fetch data
+          </p>
+        )}
+        <div className="mt-3 flex gap-2">
+          {[
+            { label: "Production", url: "https://mdm.strativon.click" },
+            { label: "Local", url: typeof window !== "undefined" ? `http://${window.location.hostname}:8000` : "http://localhost:8000" },
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => setApiUrlInput(preset.url)}
+              className="text-xs rounded-md border border-zinc-200 px-2 py-1 text-zinc-600 hover:bg-zinc-50 font-mono"
+            >
+              {preset.label}: {preset.url}
+            </button>
+          ))}
+        </div>
+      </section>
 
       {/* ── Microsoft Entra ID config ─────────────────────────────────────── */}
       <section className="bg-white rounded-xl border border-zinc-200 p-6 mb-6">
