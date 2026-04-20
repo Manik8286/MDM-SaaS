@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +65,7 @@ class SignupResponse(BaseModel):
 
 @router.post("/signup", response_model=SignupResponse, status_code=201)
 @limiter.limit("5/minute")
-async def signup(body: SignupRequest, request, db: AsyncSession = Depends(get_db)):
+async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depends(get_db)):
     # Reject duplicate email
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():

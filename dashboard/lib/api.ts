@@ -834,7 +834,11 @@ export async function signup(orgName: string, email: string, password: string): 
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    // Pydantic validation errors come back as an array
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map((e: { msg?: string }) => e.msg ?? String(e)).join(", ")
+      : err.detail || `HTTP ${res.status}`;
+    throw new Error(detail);
   }
   return res.json();
 }

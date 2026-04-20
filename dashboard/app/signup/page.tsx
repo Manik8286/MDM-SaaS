@@ -1,10 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signup, setToken } from "@/lib/api";
-import { Shield, CheckCircle, Loader2 } from "lucide-react";
+import { signup, setToken, setApiUrl, getApiUrl } from "@/lib/api";
+import { Shield, CheckCircle, Loader2, Settings } from "lucide-react";
+
+function getDevUrl() {
+  if (typeof window === "undefined") return "http://localhost:8000";
+  return `http://${window.location.hostname}:8000`;
+}
 
 const TRIAL_FEATURES = [
   "5 devices — free for 14 days",
@@ -21,6 +26,10 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [apiUrlInput, setApiUrlInput] = useState("");
+  const [showApiConfig, setShowApiConfig] = useState(false);
+
+  useEffect(() => { setApiUrlInput(getApiUrl()); }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,8 +90,40 @@ export default function SignupPage() {
             <span className="font-semibold text-zinc-900">MDM Console</span>
           </div>
 
-          <h2 className="text-xl font-semibold text-zinc-900 mb-1">Start your free trial</h2>
-          <p className="text-sm text-zinc-500 mb-6">No credit card required · 14 days · 5 devices</p>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-xl font-semibold text-zinc-900">Start your free trial</h2>
+            <button onClick={() => setShowApiConfig(!showApiConfig)}
+              className="text-xs text-zinc-400 hover:text-zinc-600 flex items-center gap-1">
+              <Settings size={11} /> API
+            </button>
+          </div>
+          <p className="text-sm text-zinc-500 mb-4">No credit card required · 14 days · 5 devices</p>
+
+          {showApiConfig && (
+            <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 space-y-2">
+              <p className="text-xs font-medium text-zinc-600">API Server</p>
+              <input
+                type="text"
+                value={apiUrlInput}
+                onChange={(e) => setApiUrlInput(e.target.value)}
+                className="w-full rounded border border-zinc-300 px-2 py-1.5 text-xs font-mono text-zinc-800 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+              />
+              <div className="flex gap-2">
+                {[{ label: "Local", url: getDevUrl() }, { label: "Production", url: "https://mdm.strativon.click" }].map(p => (
+                  <button key={p.label} type="button"
+                    onClick={() => { setApiUrlInput(p.url); setApiUrl(p.url); }}
+                    className="text-xs rounded border border-zinc-200 px-2 py-1 text-zinc-500 hover:bg-white">
+                    {p.label}
+                  </button>
+                ))}
+                <button type="button"
+                  onClick={() => { setApiUrl(apiUrlInput); setShowApiConfig(false); }}
+                  className="ml-auto text-xs rounded bg-zinc-900 text-white px-2 py-1 hover:bg-zinc-700">
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
