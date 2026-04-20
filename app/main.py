@@ -7,9 +7,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
 from app.core.config import get_settings
+from app.core.limiter import limiter
+from app.middleware.logging import configure_logging, RequestIdMiddleware
 from app.db.base import engine
 from app.db.models import Base
 from app.mdm.apple.checkin import router as checkin_router
@@ -32,13 +37,33 @@ from app.api.routes.users import router as users_router
 from app.api.routes.groups import router as groups_router
 
 settings = get_settings()
-logging.basicConfig(level=settings.log_level)
+configure_logging(level=settings.log_level, json_logs=settings.is_production)
 log = logging.getLogger(__name__)
+
+
+def _run_migrations() -> None:
+    """Run alembic upgrade head synchronously before the async app starts."""
+    import os
+    from alembic.config import Config as AlembicConfig
+    from alembic import command as alembic_command
+
+    # Resolve alembic.ini relative to the project root (one level above app/)
+    ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
+    cfg = AlembicConfig(os.path.abspath(ini_path))
+    try:
+        alembic_command.upgrade(cfg, "head")
+        log.info("Alembic migrations applied")
+    except Exception:
+        log.exception("Alembic migration failed — startup aborted")
+        raise
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting MDM SaaS API (env=%s)", settings.environment)
+
+    # Run migrations first, then let create_all handle any tables not yet in Alembic
+    _run_migrations()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -60,6 +85,11 @@ app = FastAPI(
     docs_url="/docs" if not settings.is_production else None,
     redoc_url=None,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -26,12 +26,14 @@ from app.mdm.apple.plist import (
     CheckinMessageType,
 )
 import logging
+from app.core.limiter import limiter
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.put("/mdm/apple/checkin")
+@limiter.limit("120/minute")
 async def checkin(
     request: Request,
     cert: DeviceCert = Depends(require_device_cert),

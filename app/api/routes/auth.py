@@ -15,6 +15,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.limiter import limiter
 from app.core.security import create_access_token, verify_password
 from app.core.deps import get_current_user, bearer
 from app.db.base import get_db
@@ -39,6 +40,7 @@ class TokenResponse(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -172,6 +174,7 @@ async def disable_2fa(
 
 
 @router.post("/2fa/validate", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def validate_2fa(
     body: TotpValidateRequest,
     request: Request,
