@@ -1,12 +1,14 @@
+import csv
+import io
 import secrets
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import EnrollmentToken, Tenant
-from app.core.deps import get_current_tenant
+from app.db.models import EnrollmentToken, Tenant, Device, User
+from app.core.deps import get_current_tenant, get_current_user
 import logging
 import os
 from app.mdm.apple.profiles import build_mdm_enrollment_profile, sign_profile
@@ -54,6 +56,82 @@ async def create_enrollment_token(
         reusable=body.reusable,
         expires_at=expires_at,
         enrollment_url=f"{settings.mdm_server_url.rstrip('/')}/api/v1/enrollment/{token_str}",
+    )
+
+
+@router.post("/import")
+async def import_devices_csv(
+    file: UploadFile = File(...),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Pre-stage devices from a CSV before they enroll.
+    Required column: serial_number
+    Optional columns: hostname, model, platform (macos|windows, default macos)
+
+    When a pre-staged device checks in, the MDM server matches by serial_number
+    and upgrades its UDID to the real value.
+    """
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # strip BOM if present
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames or "serial_number" not in reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV must have a 'serial_number' column")
+
+    # Fetch existing serials to avoid duplicates
+    existing_result = await db.execute(
+        select(Device.serial_number).where(Device.tenant_id == tenant.id)
+    )
+    existing_serials = {row[0] for row in existing_result.all() if row[0]}
+
+    imported, skipped, errors = 0, 0, []
+    for i, row in enumerate(reader, start=2):
+        serial = (row.get("serial_number") or "").strip().upper()
+        if not serial:
+            errors.append(f"Row {i}: missing serial_number")
+            continue
+        if serial in existing_serials:
+            skipped += 1
+            continue
+
+        platform = (row.get("platform") or "macos").strip().lower()
+        if platform not in ("macos", "windows"):
+            platform = "macos"
+
+        # Use a placeholder UDID until device checks in
+        placeholder_udid = f"serial:{serial}"
+        device = Device(
+            tenant_id=tenant.id,
+            udid=placeholder_udid,
+            serial_number=serial,
+            hostname=(row.get("hostname") or "").strip() or None,
+            model=(row.get("model") or "").strip() or None,
+            platform=platform,
+            status="pending",
+            enroll_type="csv_import",
+        )
+        db.add(device)
+        existing_serials.add(serial)
+        imported += 1
+
+    await db.flush()
+    return {"imported": imported, "skipped": skipped, "errors": errors}
+
+
+@router.get("/import/template")
+async def download_csv_template():
+    """Return a CSV template for bulk device import."""
+    csv_content = "serial_number,hostname,model,platform\nC02XG1JHJGH5,johns-mbp,MacBook Pro 16,macos\n"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="device_import_template.csv"'},
     )
 
 

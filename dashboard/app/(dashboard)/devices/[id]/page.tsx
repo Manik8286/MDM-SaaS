@@ -5,12 +5,12 @@ import {
   getDevice, lockDevice, eraseDevice, restartDevice, queryDevice,
   getDeviceApps, getDeviceUpdates, getDeviceCompliance, scanDevice, installUpdates,
   getDeviceUsers, refreshDeviceUsers, getAgentToken, pushUsbBlockDevice, removeUsbBlockDevice, pushPssoDevice,
-  pushIcloudBlockDevice, removeIcloudBlockDevice, pushOneDriveKfmDevice,
-  type Device, type InstalledApp, type DeviceUpdate, type ComplianceStatus, type DeviceUser,
+  pushIcloudBlockDevice, removeIcloudBlockDevice, pushOneDriveKfmDevice, getDeviceTimeline,
+  type Device, type InstalledApp, type DeviceUpdate, type ComplianceStatus, type DeviceUser, type TimelineEvent,
 } from "@/lib/api";
 import {
   ArrowLeft, Lock, Trash2, RefreshCw, Search, Loader2, CheckCircle2,
-  Clock, X, ShieldCheck, ShieldAlert, ShieldOff, Download, Package, Users, Terminal, Copy, Check,
+  Clock, X, ShieldCheck, ShieldAlert, ShieldOff, Download, Package, Users, Terminal, Copy, Check, History,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -113,7 +113,11 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
   const [toast, setToast] = useState("");
   const [polling, setPolling] = useState(false);
   const [showLockModal, setShowLockModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "patch" | "users" | "agent">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "patch" | "users" | "agent" | "timeline">("overview");
+
+  // Timeline tab state
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   // Agent tab state
   const [agentInfo, setAgentInfo] = useState<{ device_id: string; agent_token: string; server_url: string; bootstrap_url: string } | null>(null);
@@ -154,6 +158,14 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
   }
 
   useEffect(() => { if (activeTab === "users") loadUsers(); }, [activeTab]);
+
+  async function loadTimeline() {
+    setTimelineLoading(true);
+    try { setTimeline(await getDeviceTimeline(id, 60)); }
+    finally { setTimelineLoading(false); }
+  }
+
+  useEffect(() => { if (activeTab === "timeline") loadTimeline(); }, [activeTab]);
 
   // Patch tab state
   const [compliance, setCompliance] = useState<ComplianceStatus | null>(null);
@@ -297,12 +309,12 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 border-b border-zinc-200">
-        {(["overview", "patch", "users", "agent"] as const).map(tab => (
+        {(["overview", "patch", "users", "agent", "timeline"] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-700"
             }`}>
-            {tab === "overview" ? "Overview" : tab === "patch" ? "Patch & Compliance" : tab === "users" ? "Users" : "Agent"}
+            {tab === "overview" ? "Overview" : tab === "patch" ? "Patch & Compliance" : tab === "users" ? "Users" : tab === "agent" ? "Agent" : "Timeline"}
           </button>
         ))}
       </div>
@@ -644,6 +656,75 @@ export default function DeviceDetailPage({ params }: { params: Promise<{ id: str
             <p className="font-medium text-zinc-700">Managing user privileges</p>
             <p><strong>For Entra ID (cloud) users:</strong> Go to <strong>Settings → Push PSSO Profile</strong> and set Admin Groups to the Entra group whose members should get local admin rights on the Mac.</p>
             <p><strong>For local accounts:</strong> Use the <strong>Agent tab</strong> to install the MDM management agent — it enables automatic admin elevation via the Policies page.</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Timeline tab ── */}
+      {activeTab === "timeline" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-zinc-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-medium text-zinc-900 flex items-center gap-2">
+                <History size={15} /> Device History
+              </h2>
+              <button onClick={loadTimeline} disabled={timelineLoading}
+                className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800">
+                <RefreshCw size={12} className={timelineLoading ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
+
+            {timelineLoading ? (
+              <div className="flex items-center gap-2 text-sm text-zinc-400 py-6">
+                <Loader2 size={14} className="animate-spin" /> Loading…
+              </div>
+            ) : timeline.length === 0 ? (
+              <p className="text-sm text-zinc-400 py-4">No history yet for this device.</p>
+            ) : (
+              <div className="relative">
+                <div className="absolute left-[11px] top-0 bottom-0 w-px bg-zinc-100" />
+                <div className="space-y-4">
+                  {timeline.map((ev, i) => {
+                    const isCmd = ev.type === "command";
+                    const statusColor = ev.status === "completed" ? "text-green-600 bg-green-50 border-green-200"
+                      : ev.status === "failed" ? "text-red-600 bg-red-50 border-red-200"
+                      : ev.status === "queued" ? "text-amber-600 bg-amber-50 border-amber-200"
+                      : "text-zinc-500 bg-zinc-50 border-zinc-200";
+                    const dotColor = ev.status === "completed" ? "bg-green-500"
+                      : ev.status === "failed" ? "bg-red-500"
+                      : ev.status === "queued" ? "bg-amber-400"
+                      : "bg-zinc-400";
+                    return (
+                      <div key={i} className="flex gap-4 relative">
+                        <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center z-10 mt-0.5 ${dotColor}`}>
+                          {isCmd
+                            ? <Terminal size={11} className="text-white" />
+                            : <Clock size={11} className="text-white" />}
+                        </div>
+                        <div className="flex-1 pb-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="text-sm font-medium text-zinc-900">{ev.title}</span>
+                              {isCmd && (
+                                <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${statusColor}`}>
+                                  {ev.status}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-zinc-400 flex-shrink-0">
+                              {new Date(ev.timestamp).toLocaleString()}
+                            </span>
+                          </div>
+                          {ev.detail && (
+                            <p className="text-xs text-zinc-400 mt-0.5 font-mono">{ev.detail}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

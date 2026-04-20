@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createEnrollmentToken, type EnrollmentToken } from "@/lib/api";
-import { Copy, CheckCheck, Plus, Download, QrCode, RefreshCw } from "lucide-react";
+import { createEnrollmentToken, importDevicesCsv, csvTemplateUrl, type EnrollmentToken, type ImportResult } from "@/lib/api";
+import { Copy, CheckCheck, Plus, Download, QrCode, RefreshCw, Upload, FileText } from "lucide-react";
 
 export default function EnrollmentPage() {
   const [platform, setPlatform] = useState("macos");
@@ -13,6 +13,12 @@ export default function EnrollmentPage() {
   const [token, setToken] = useState<EnrollmentToken | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+
+  // CSV import state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState("");
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -25,6 +31,23 @@ export default function EnrollmentPage() {
       setError(err instanceof Error ? err.message : "Failed to create token");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleImport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!csvFile) return;
+    setImporting(true);
+    setImportResult(null);
+    setImportError("");
+    try {
+      const result = await importDevicesCsv(csvFile);
+      setImportResult(result);
+      setCsvFile(null);
+    } catch (err: unknown) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -208,6 +231,68 @@ export default function EnrollmentPage() {
           </ol>
         </div>
       )}
+
+      {/* ── Bulk CSV import ── */}
+      <div className="mt-6 bg-white rounded-xl border border-zinc-200 p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-medium text-zinc-900 flex items-center gap-2">
+            <FileText size={14} /> Bulk Import via CSV
+          </h2>
+          <a
+            href={csvTemplateUrl()}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-800 transition-colors"
+          >
+            <Download size={12} /> Download template
+          </a>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4">
+          Pre-stage devices by serial number before they enroll. Required column: <code className="bg-zinc-100 px-1 rounded">serial_number</code>.
+          Optional: <code className="bg-zinc-100 px-1 rounded">hostname</code>, <code className="bg-zinc-100 px-1 rounded">model</code>, <code className="bg-zinc-100 px-1 rounded">platform</code>.
+        </p>
+
+        <form onSubmit={handleImport} className="space-y-3">
+          <label className="flex flex-col items-center justify-center gap-2 w-full rounded-lg border-2 border-dashed border-zinc-300 hover:border-zinc-400 cursor-pointer py-6 transition-colors">
+            <Upload size={20} className="text-zinc-400" />
+            <span className="text-sm text-zinc-500">
+              {csvFile ? csvFile.name : "Click to choose a CSV file"}
+            </span>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => { setCsvFile(e.target.files?.[0] ?? null); setImportResult(null); setImportError(""); }}
+            />
+          </label>
+
+          {importError && (
+            <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{importError}</p>
+          )}
+
+          {importResult && (
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+              <p className="font-medium">Import complete</p>
+              <p className="text-xs mt-1">
+                {importResult.imported} imported · {importResult.skipped} skipped (already exist)
+                {importResult.errors.length > 0 && ` · ${importResult.errors.length} errors`}
+              </p>
+              {importResult.errors.length > 0 && (
+                <ul className="mt-2 space-y-0.5 text-xs text-red-700">
+                  {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!csvFile || importing}
+            className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+          >
+            <Upload size={14} />
+            {importing ? "Importing…" : "Import Devices"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

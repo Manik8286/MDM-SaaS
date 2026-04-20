@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, setup2fa, enable2fa, disable2fa, type TenantInfo } from "@/lib/api";
-import { Save, Send, CheckCircle, Globe, ShieldCheck, ShieldOff } from "lucide-react";
+import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, setup2fa, enable2fa, disable2fa, getTenantUsage, type TenantInfo, type TenantUsage } from "@/lib/api";
+import { Save, Send, CheckCircle, Globe, ShieldCheck, ShieldOff, Monitor, Activity, HardDrive } from "lucide-react";
 
 export default function SettingsPage() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
@@ -28,6 +28,9 @@ export default function SettingsPage() {
   const [pushResult, setPushResult] = useState<{ queued: number } | null>(null);
   const [pushError, setPushError] = useState("");
 
+  // Usage state
+  const [usage, setUsage] = useState<TenantUsage | null>(null);
+
   // 2FA state
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string; qr_svg: string } | null>(null);
   const [totpCode, setTotpCode] = useState("");
@@ -41,9 +44,10 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    getTenant()
-      .then((t) => {
+    Promise.all([getTenant(), getTenantUsage()])
+      .then(([t, u]) => {
         setTenant(t);
+        setUsage(u);
         setEntraTenantId(t.entra_tenant_id ?? "");
         setEntraClientId(t.entra_client_id ?? "");
       })
@@ -109,6 +113,40 @@ export default function SettingsPage() {
         <div className="mb-6 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {/* ── Usage overview ──────────────────────────────────────────────── */}
+      {usage && (
+        <section className="bg-white rounded-xl border border-zinc-200 p-6 mb-6">
+          <h2 className="text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2">
+            <Activity size={14} /> Usage Overview
+          </h2>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1">
+                <Monitor size={11} /> Devices
+              </div>
+              <p className="text-2xl font-semibold text-zinc-900">{usage.total_devices}</p>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {usage.enrolled_devices} enrolled · {usage.pending_devices} pending
+              </p>
+            </div>
+            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1">
+                <Activity size={11} /> Commands (30d)
+              </div>
+              <p className="text-2xl font-semibold text-zinc-900">{usage.commands_last_30_days}</p>
+              <p className="text-xs text-zinc-400 mt-0.5">{usage.commands_queued} queued</p>
+            </div>
+            <div className="rounded-lg bg-zinc-50 border border-zinc-200 px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1">
+                <HardDrive size={11} /> Storage
+              </div>
+              <p className="text-2xl font-semibold text-zinc-900">{usage.storage_used_mb} MB</p>
+              <p className="text-xs text-zinc-400 mt-0.5">software packages</p>
+            </div>
+          </div>
+        </section>
       )}
 
       {/* ── API Server URL ───────────────────────────────────────────────── */}

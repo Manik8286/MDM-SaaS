@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from pydantic import BaseModel
 from app.db.base import get_db
-from app.db.models import Device, MdmCommand, Tenant, User, DeviceUser
+from app.db.models import Device, MdmCommand, Tenant, User, DeviceUser, AuditLog
 from app.core.deps import get_current_tenant, get_current_user
 from app.core.config import get_settings
 
@@ -324,6 +324,53 @@ async def get_agent_token(
         "server_url": public_url,
         "bootstrap_url": f"{public_url}/api/v1/agent/bootstrap/{device.id}",
     }
+
+
+@router.get("/{device_id}/timeline")
+async def device_timeline(
+    device_id: str,
+    limit: int = 50,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a merged chronological timeline of commands and audit events for a device."""
+    await _get_device(device_id, tenant, db)
+
+    commands_result = await db.execute(
+        select(MdmCommand)
+        .where(MdmCommand.device_id == device_id, MdmCommand.tenant_id == tenant.id)
+        .order_by(MdmCommand.queued_at.desc())
+        .limit(limit)
+    )
+    audit_result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.resource_id == device_id, AuditLog.tenant_id == tenant.id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    )
+
+    events = []
+    for cmd in commands_result.scalars().all():
+        events.append({
+            "type": "command",
+            "timestamp": (cmd.executed_at or cmd.queued_at).isoformat(),
+            "title": cmd.command_type,
+            "status": cmd.status,
+            "detail": f"UUID: {cmd.command_uuid[:8]}…",
+            "command_uuid": cmd.command_uuid,
+        })
+    for log in audit_result.scalars().all():
+        events.append({
+            "type": "audit",
+            "timestamp": log.created_at.isoformat(),
+            "title": log.action,
+            "status": "info",
+            "detail": str(log.changes or ""),
+            "actor_id": log.actor_id,
+        })
+
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return events[:limit]
 
 
 @router.post("/{device_id}/users/refresh", status_code=202)

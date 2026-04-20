@@ -754,6 +754,66 @@ export function getProfileVersionDiff(profileId: string, version: number): Promi
   return request(`/profiles/${profileId}/versions/${version}/diff`);
 }
 
+// ── Device timeline ────────────────────────────────────────────────────────
+
+export interface TimelineEvent {
+  type: "command" | "audit";
+  timestamp: string;
+  title: string;
+  status: string;
+  detail: string;
+  command_uuid?: string;
+  actor_id?: string;
+}
+
+export function getDeviceTimeline(deviceId: string, limit = 50): Promise<TimelineEvent[]> {
+  return request(`/devices/${deviceId}/timeline?limit=${limit}`);
+}
+
+// ── Bulk CSV import ────────────────────────────────────────────────────────
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+export async function importDevicesCsv(file: File): Promise<ImportResult> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("mdm_token") : null;
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${getApiUrl()}/api/v1/enrollment/import`, {
+    method: "POST",
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export function csvTemplateUrl(): string {
+  return `${getApiUrl()}/api/v1/enrollment/import/template`;
+}
+
+// ── Tenant usage ───────────────────────────────────────────────────────────
+
+export interface TenantUsage {
+  total_devices: number;
+  enrolled_devices: number;
+  pending_devices: number;
+  commands_last_30_days: number;
+  commands_queued: number;
+  storage_used_bytes: number;
+  storage_used_mb: number;
+}
+
+export function getTenantUsage(): Promise<TenantUsage> {
+  return request("/tenant/usage");
+}
+
 export function updateProfile(
   profileId: string,
   patch: { name?: string; payload?: Record<string, unknown>; change_note?: string },
