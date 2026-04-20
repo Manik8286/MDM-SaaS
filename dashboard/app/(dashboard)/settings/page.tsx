@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
 
   // 2FA state
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string; qr_svg: string } | null>(null);
@@ -223,8 +224,12 @@ export default function SettingsPage() {
                       disabled={isCurrent || checkoutLoading === key}
                       onClick={async () => {
                         setCheckoutLoading(key);
+                        setCheckoutError("");
                         try { await startCheckout(key); }
-                        catch { setCheckoutLoading(null); }
+                        catch (e: unknown) {
+                          setCheckoutError(e instanceof Error ? e.message : "Checkout failed");
+                          setCheckoutLoading(null);
+                        }
                       }}
                       className={`flex items-center justify-center gap-1.5 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
                         isCurrent
@@ -237,6 +242,12 @@ export default function SettingsPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {checkoutError && (
+            <div className="mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              {checkoutError}
             </div>
           )}
 

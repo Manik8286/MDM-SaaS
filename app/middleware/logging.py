@@ -78,19 +78,15 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         log = logging.getLogger("mdm.access")
 
         start = time.perf_counter()
+        response: Response | None = None
         try:
-            response: Response = await call_next(request)
+            response = await call_next(request)
         except Exception:
             raise
         finally:
             latency_ms = round((time.perf_counter() - start) * 1000, 1)
-            log.info(
-                "%s %s %s %.1fms",
-                request.method,
-                request.url.path,
-                getattr(response, "status_code", "???"),
-                latency_ms,
-            )
+            status = response.status_code if response is not None else "???"
+            log.info("%s %s %s %.1fms", request.method, request.url.path, status, latency_ms)
             _request_id_var.reset(token)
 
         response.headers["X-Request-ID"] = req_id
