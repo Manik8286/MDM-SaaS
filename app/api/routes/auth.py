@@ -7,9 +7,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
-import pyotp
-import qrcode
-import qrcode.image.svg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Cookie
 from fastapi.responses import RedirectResponse, HTMLResponse, Response
 from jose import jwt as jose_jwt
@@ -86,6 +83,8 @@ async def logout(
         exp_ts = payload.get("exp")
         expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else datetime.now(timezone.utc)
         db.add(RevokedToken(jti=jti, user_id=user.id, expires_at=expires_at))
+        from app.core.deps import _cache_invalidate
+        _cache_invalidate(jti)
     await write_audit(
         db, user.tenant_id, "auth.logout", "user",
         actor_id=user.id, resource_id=user.id,
@@ -114,6 +113,10 @@ async def setup_2fa(
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a new TOTP secret (does not activate until /2fa/enable is called)."""
+    import pyotp
+    import qrcode
+    import qrcode.image.svg
+
     secret = pyotp.random_base32()
     # Store the pending secret on the user (not yet enabled)
     user.totp_secret = secret
@@ -140,6 +143,7 @@ async def enable_2fa(
     """Verify a TOTP code against the pending secret and activate 2FA."""
     if not user.totp_secret:
         raise HTTPException(status_code=400, detail="Call /2fa/setup first")
+    import pyotp
     totp = pyotp.TOTP(user.totp_secret)
     if not totp.verify(body.totp_code, valid_window=1):
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
@@ -157,6 +161,7 @@ async def disable_2fa(
     """Verify TOTP code then disable 2FA."""
     if not user.totp_enabled or not user.totp_secret:
         raise HTTPException(status_code=400, detail="2FA is not enabled")
+    import pyotp
     totp = pyotp.TOTP(user.totp_secret)
     if not totp.verify(body.totp_code, valid_window=1):
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
@@ -190,6 +195,7 @@ async def validate_2fa(
     if not user.totp_enabled or not user.totp_secret:
         raise HTTPException(status_code=400, detail="2FA not configured for this user")
 
+    import pyotp
     totp = pyotp.TOTP(user.totp_secret)
     if not totp.verify(body.totp_code, valid_window=1):
         raise HTTPException(status_code=401, detail="Invalid TOTP code")

@@ -1,3 +1,4 @@
+import time
 from fastapi import Depends, HTTPException, status, Cookie, Request
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -12,6 +13,17 @@ bearer = HTTPBearer()
 
 PORTAL_COOKIE = "mdm_portal_session"
 
+# In-process cache: jti → timestamp last confirmed NOT revoked.
+# Avoids a DB round-trip on every authenticated request.
+# Revoked tokens are never added here; cache TTL is 60s.
+_revocation_cache: dict[str, float] = {}
+_REVOCATION_CACHE_TTL = 60  # seconds
+
+
+def _cache_invalidate(jti: str) -> None:
+    """Call this when a token is revoked so the cache is immediately cleared."""
+    _revocation_cache.pop(jti, None)
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer),
@@ -22,12 +34,17 @@ async def get_current_user(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    # Check token revocation blocklist
+    # Check token revocation blocklist — with in-process TTL cache to avoid
+    # a DB hit on every authenticated request.
     jti = payload.get("jti")
     if jti:
-        revoked = await db.execute(select(RevokedToken).where(RevokedToken.jti == jti))
-        if revoked.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+        now = time.monotonic()
+        cached_at = _revocation_cache.get(jti)
+        if cached_at is None or (now - cached_at) > _REVOCATION_CACHE_TTL:
+            revoked = await db.execute(select(RevokedToken).where(RevokedToken.jti == jti))
+            if revoked.scalar_one_or_none():
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+            _revocation_cache[jti] = now
 
     result = await db.execute(select(User).where(User.id == payload["sub"]))
     user = result.scalar_one_or_none()
