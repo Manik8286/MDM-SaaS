@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # Notifications — optional webhook URL (Slack/Teams/Discord incoming webhook)
     notification_webhook_url: str = ""
 
+    # Stripe billing
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_starter_price_id: str = ""   # Stripe Price ID for Starter plan
+    stripe_pro_price_id: str = ""       # Stripe Price ID for Professional plan
+    app_base_url: str = "http://localhost:3000"  # Dashboard URL for Stripe redirects
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

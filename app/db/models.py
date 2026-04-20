@@ -19,7 +19,7 @@ class Tenant(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    plan: Mapped[str] = mapped_column(String(50), default="starter")
+    plan: Mapped[str] = mapped_column(String(50), default="trial")
     status: Mapped[str] = mapped_column(String(50), default="active")
     # APNs — stored as Secrets Manager ARNs in production
     apns_cert_arn: Mapped[str | None] = mapped_column(String(500))
@@ -29,6 +29,12 @@ class Tenant(Base):
     entra_tenant_id: Mapped[str | None] = mapped_column(String(255))
     entra_client_id: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Billing
+    billing_status: Mapped[str] = mapped_column(String(50), default="trialing")
+    plan_device_limit: Mapped[int] = mapped_column(Integer, default=5)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
     devices: Mapped[list["Device"]] = relationship(back_populates="tenant")

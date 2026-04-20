@@ -34,12 +34,30 @@ class TokenResponse(BaseModel):
     enrollment_url: str
 
 
+async def _check_device_limit(tenant: Tenant, db: AsyncSession) -> None:
+    """Raise 402 if the tenant has hit their plan's device limit."""
+    from sqlalchemy import func as sqlfunc
+    from app.db.models import Device as DeviceModel
+    count = await db.scalar(
+        select(sqlfunc.count(DeviceModel.id)).where(DeviceModel.tenant_id == tenant.id)
+    )
+    if (count or 0) >= tenant.plan_device_limit:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Device limit reached ({tenant.plan_device_limit} devices on '{tenant.plan}' plan). "
+                "Upgrade your plan to enroll more devices."
+            ),
+        )
+
+
 @router.post("/tokens", response_model=TokenResponse)
 async def create_enrollment_token(
     body: CreateTokenRequest,
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
 ):
+    await _check_device_limit(tenant, db)
     token_str = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=body.expires_in_hours)
     record = EnrollmentToken(

@@ -255,6 +255,13 @@ function LoginForm() {
         <p className="mt-4 text-center text-xs text-zinc-400">
           Authenticate with your organisation&apos;s Microsoft Entra ID account
         </p>
+
+        <p className="mt-6 text-center text-sm text-zinc-500">
+          Don&apos;t have an account?{" "}
+          <a href="/signup" className="text-zinc-900 font-medium hover:underline">
+            Start free trial
+          </a>
+        </p>
       </div>
     </div>
   );

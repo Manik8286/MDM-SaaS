@@ -823,3 +823,57 @@ export function updateProfile(
     body: JSON.stringify(patch),
   });
 }
+
+// ── Signup ─────────────────────────────────────────────────────────────────
+
+export async function signup(orgName: string, email: string, password: string): Promise<{ access_token: string; tenant_id: string; tenant_slug: string }> {
+  const res = await fetch(`${getApiBase()}/api/v1/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ org_name: orgName, email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Billing ────────────────────────────────────────────────────────────────
+
+export interface Plan {
+  name: string;
+  price_monthly: number | null;
+  device_limit: number;
+  duration_days: number | null;
+  features: string[];
+}
+
+export interface BillingStatus {
+  plan: string;
+  plan_name: string;
+  billing_status: string;
+  device_limit: number;
+  trial_ends_at: string | null;
+  trial_expired: boolean;
+  features: string[];
+  has_stripe: boolean;
+}
+
+export function getPlans(): Promise<Plan[]> {
+  return request("/billing/plans");
+}
+
+export function getBillingStatus(): Promise<BillingStatus> {
+  return request("/billing/status");
+}
+
+export async function startCheckout(plan: "starter" | "professional"): Promise<void> {
+  const { url } = await request<{ url: string }>(`/billing/checkout?plan=${plan}`, { method: "POST" });
+  window.location.href = url;
+}
+
+export async function openBillingPortal(): Promise<void> {
+  const { url } = await request<{ url: string }>("/billing/portal");
+  window.location.href = url;
+}

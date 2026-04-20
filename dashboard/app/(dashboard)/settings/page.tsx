@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, setup2fa, enable2fa, disable2fa, getTenantUsage, type TenantInfo, type TenantUsage } from "@/lib/api";
-import { Save, Send, CheckCircle, Globe, ShieldCheck, ShieldOff, Monitor, Activity, HardDrive } from "lucide-react";
+import { getTenant, updateTenant, pushPsso, setApiUrl, getApiUrl, setup2fa, enable2fa, disable2fa, getTenantUsage, getBillingStatus, getPlans, startCheckout, openBillingPortal, type TenantInfo, type TenantUsage, type BillingStatus, type Plan } from "@/lib/api";
+import { Save, Send, CheckCircle, Globe, ShieldCheck, ShieldOff, Monitor, Activity, HardDrive, CreditCard, Zap, ArrowUpRight } from "lucide-react";
 
 export default function SettingsPage() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
@@ -31,6 +31,11 @@ export default function SettingsPage() {
   // Usage state
   const [usage, setUsage] = useState<TenantUsage | null>(null);
 
+  // Billing state
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+
   // 2FA state
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth_url: string; qr_svg: string } | null>(null);
   const [totpCode, setTotpCode] = useState("");
@@ -44,10 +49,12 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    Promise.all([getTenant(), getTenantUsage()])
-      .then(([t, u]) => {
+    Promise.all([getTenant(), getTenantUsage(), getBillingStatus(), getPlans()])
+      .then(([t, u, b, p]) => {
         setTenant(t);
         setUsage(u);
+        setBilling(b);
+        setPlans(p);
         setEntraTenantId(t.entra_tenant_id ?? "");
         setEntraClientId(t.entra_client_id ?? "");
       })
@@ -146,6 +153,98 @@ export default function SettingsPage() {
               <p className="text-xs text-zinc-400 mt-0.5">software packages</p>
             </div>
           </div>
+        </section>
+      )}
+
+      {/* ── Billing ─────────────────────────────────────────────────────── */}
+      {billing && (
+        <section className="bg-white rounded-xl border border-zinc-200 p-6 mb-6">
+          <h2 className="text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2">
+            <CreditCard size={14} /> Plan &amp; Billing
+          </h2>
+
+          {/* Current plan banner */}
+          <div className={`rounded-lg px-4 py-3 mb-5 flex items-center justify-between ${
+            billing.billing_status === "active" ? "bg-green-50 border border-green-200" :
+            billing.billing_status === "past_due" ? "bg-red-50 border border-red-200" :
+            "bg-amber-50 border border-amber-200"
+          }`}>
+            <div>
+              <p className={`text-sm font-semibold ${
+                billing.billing_status === "active" ? "text-green-800" :
+                billing.billing_status === "past_due" ? "text-red-800" : "text-amber-800"
+              }`}>
+                {billing.plan_name} plan
+                <span className="ml-2 text-xs font-normal opacity-75">
+                  {billing.billing_status === "trialing"
+                    ? `Trial · ${billing.trial_ends_at ? Math.max(0, Math.ceil((new Date(billing.trial_ends_at).getTime() - Date.now()) / 86400000)) : 0} days left`
+                    : billing.billing_status === "past_due" ? "Payment past due"
+                    : billing.billing_status === "canceled" ? "Canceled"
+                    : "Active"}
+                </span>
+              </p>
+              <p className="text-xs opacity-60 mt-0.5">
+                {billing.device_limit} device limit · {billing.features.join(" · ")}
+              </p>
+            </div>
+            {billing.has_stripe && (
+              <button
+                onClick={() => openBillingPortal()}
+                className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-zinc-900 border border-zinc-300 rounded-lg px-3 py-1.5 hover:bg-white transition-colors"
+              >
+                <ArrowUpRight size={12} /> Manage
+              </button>
+            )}
+          </div>
+
+          {/* Upgrade plans — only show if not on professional/enterprise */}
+          {billing.plan !== "professional" && billing.plan !== "enterprise" && (
+            <div className="grid grid-cols-2 gap-4">
+              {plans.filter(p => p.price_monthly && p.price_monthly > 0 && p.name !== "Enterprise").map((plan) => {
+                const key = plan.name.toLowerCase() as "starter" | "professional";
+                const isCurrent = billing.plan_name === plan.name;
+                return (
+                  <div key={plan.name} className={`rounded-xl border p-4 ${isCurrent ? "border-zinc-900 bg-zinc-50" : "border-zinc-200"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-semibold text-zinc-900">{plan.name}</p>
+                      <p className="text-sm font-semibold text-zinc-900">
+                        ${plan.price_monthly}<span className="text-xs font-normal text-zinc-400">/mo</span>
+                      </p>
+                    </div>
+                    <ul className="space-y-1 mb-4">
+                      {plan.features.map((f) => (
+                        <li key={f} className="flex items-center gap-1.5 text-xs text-zinc-500">
+                          <CheckCircle size={10} className="text-green-500 flex-shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      disabled={isCurrent || checkoutLoading === key}
+                      onClick={async () => {
+                        setCheckoutLoading(key);
+                        try { await startCheckout(key); }
+                        catch { setCheckoutLoading(null); }
+                      }}
+                      className={`flex items-center justify-center gap-1.5 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                        isCurrent
+                          ? "bg-zinc-900 text-white cursor-default"
+                          : "bg-zinc-900 text-white hover:bg-zinc-700"
+                      } disabled:opacity-50`}
+                    >
+                      {checkoutLoading === key ? "Redirecting…" : isCurrent ? "Current plan" : <><Zap size={11} /> Upgrade</>}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {billing.trial_expired && (
+            <p className="mt-4 text-xs text-red-600 font-medium">
+              Your trial has expired. Upgrade to continue enrolling devices.
+            </p>
+          )}
         </section>
       )}
 
