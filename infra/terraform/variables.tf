@@ -142,3 +142,13 @@ variable "stripe_pro_price_id" {
   description = "Stripe live-mode Price ID for the Professional plan"
   type        = string
 }
+
+# ---------------------------------------------------------------------------
+# Platform admin — cross-tenant "Customers" view for the product owner
+# ---------------------------------------------------------------------------
+
+variable "platform_admin_emails" {
+  description = "Comma-separated dashboard-user emails allowed to see all tenants + billing. Empty disables the feature."
+  type        = string
+  default     = ""
+}

@@ -7,9 +7,11 @@ from sqlalchemy import select
 from app.db.base import get_db
 from app.db.models import User, Tenant, RevokedToken
 from app.core.security import decode_token
+from app.core.config import get_settings
 from typing import Optional
 
 bearer = HTTPBearer()
+settings = get_settings()
 
 PORTAL_COOKIE = "mdm_portal_session"
 
@@ -62,6 +64,18 @@ async def get_current_tenant(
     if not tenant or tenant.status != "active":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not active")
     return tenant
+
+
+async def require_platform_admin(user: User = Depends(get_current_user)) -> User:
+    """
+    Gate for the cross-tenant Platform Admin view. Re-checks the allowlist on
+    every request (not a cached JWT claim) so removing an email takes effect
+    immediately, without waiting for that user's token to expire.
+    """
+    allowed = {e.strip().lower() for e in settings.platform_admin_emails.split(",") if e.strip()}
+    if user.email.lower() not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    return user
 
 
 class PortalSession:

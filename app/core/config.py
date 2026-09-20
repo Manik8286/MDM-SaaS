@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     stripe_pro_price_id: str = ""       # Stripe Price ID for Professional plan
     app_base_url: str = "http://localhost:3000"  # Dashboard URL for Stripe redirects
 
+    # Platform admin — comma-separated emails allowed to see the cross-tenant
+    # "Platform Admin" view (all customers + billing). These are ordinary
+    # dashboard users; this just grants one extra page on top of their normal
+    # tenant access. Empty = feature disabled for everyone.
+    platform_admin_emails: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

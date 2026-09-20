@@ -37,6 +37,7 @@ from app.api.routes.users import router as users_router
 from app.api.routes.groups import router as groups_router
 from app.api.routes.signup import router as signup_router
 from app.api.routes.billing import router as billing_router
+from app.api.routes.platform import router as platform_router
 
 settings = get_settings()
 configure_logging(level=settings.log_level, json_logs=settings.is_production)
@@ -160,6 +161,7 @@ app.include_router(users_router,        prefix="/api/v1", tags=["Users"])
 app.include_router(groups_router,       prefix="/api/v1", tags=["Groups"])
 app.include_router(signup_router,       prefix="/api/v1", tags=["Signup"])
 app.include_router(billing_router,      prefix="/api/v1", tags=["Billing"])
+app.include_router(platform_router,     prefix="/api/v1", tags=["Platform Admin"])
 
 
 @app.get("/healthz", tags=["Health"])

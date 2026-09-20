@@ -83,6 +83,7 @@ resource "aws_ecs_task_definition" "api" {
         { name = "STRIPE_PRO_PRICE_ID", value = var.stripe_pro_price_id },
         { name = "APP_BASE_URL", value = var.dashboard_url },
         { name = "DASHBOARD_URL", value = var.dashboard_url },
+        { name = "PLATFORM_ADMIN_EMAILS", value = var.platform_admin_emails },
       ]
 
       secrets = [

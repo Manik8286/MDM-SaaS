@@ -900,3 +900,25 @@ export async function openBillingPortal(): Promise<void> {
   const { url } = await request<{ url: string }>("/billing/portal");
   window.location.href = url;
 }
+
+// ── Platform Admin (product owner only) ───────────────────────────────────
+
+export interface PlatformTenant {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  status: string;
+  billing_status: string;
+  plan_device_limit: number;
+  device_count: number;
+  user_count: number;
+  trial_ends_at: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  created_at: string | null;
+}
+
+export function getPlatformTenants(): Promise<PlatformTenant[]> {
+  return request("/platform/tenants");
+}
