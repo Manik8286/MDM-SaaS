@@ -30,11 +30,23 @@ class Settings(BaseSettings):
     mdm_signing_cert_path: str = "./certs/dev/mdm_signing.pem"
     mdm_signing_key_path: str = "./certs/dev/mdm_signing.key"
 
+    # Software package storage. Empty = store on local disk (dev / docker
+    # volume). Set to an S3 bucket name in production — Fargate tasks have no
+    # durable local disk, so uploaded .pkg/.dmg files would vanish on restart.
+    packages_s3_bucket: str = ""
+
     # mTLS CA cert
     mdm_ca_cert_path: str = "./certs/dev/ca.pem"
 
     # Public base URL of this server (used in enrollment profiles)
     mdm_server_url: str = "http://localhost:8000"
+
+    # Public base URL for device mTLS endpoints (/mdm/apple/checkin, /connect).
+    # In production this points at the ALB's mutual-TLS listener (a separate
+    # port from mdm_server_url, since that listener requires every caller to
+    # present a client cert — browsers/dashboard traffic must not go through it).
+    # Falls back to mdm_server_url when unset (dev: no separate mTLS listener).
+    mdm_device_url: str = ""
 
     # Dashboard public URL (used in OAuth2 redirect after SSO login)
     dashboard_url: str = "http://localhost:3000"
@@ -71,6 +83,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def mdm_device_base_url(self) -> str:
+        return self.mdm_device_url or self.mdm_server_url
 
     @property
     def apns_host(self) -> str:

@@ -52,6 +52,9 @@ data "aws_iam_policy_document" "ecs_task_execution_secrets" {
       aws_secretsmanager_secret.mdm_signing_cert.arn,
       aws_secretsmanager_secret.mdm_signing_key.arn,
       aws_secretsmanager_secret.device_identity_p12.arn,
+      aws_secretsmanager_secret.stripe_secret_key.arn,
+      aws_secretsmanager_secret.stripe_webhook_secret.arn,
+      aws_secretsmanager_secret.smtp_password.arn,
     ]
   }
 }
@@ -109,6 +112,9 @@ data "aws_iam_policy_document" "ecs_task_permissions" {
       aws_secretsmanager_secret.mdm_signing_cert.arn,
       aws_secretsmanager_secret.mdm_signing_key.arn,
       aws_secretsmanager_secret.device_identity_p12.arn,
+      aws_secretsmanager_secret.stripe_secret_key.arn,
+      aws_secretsmanager_secret.stripe_webhook_secret.arn,
+      aws_secretsmanager_secret.smtp_password.arn,
     ]
   }
 
@@ -122,6 +128,25 @@ data "aws_iam_policy_document" "ecs_task_permissions" {
       "logs:PutLogEvents",
     ]
     resources = ["arn:aws:logs:${var.aws_region}:*:*"]
+  }
+
+  # S3 - software package storage (see s3.tf)
+  statement {
+    sid    = "PackagesBucketObjects"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["${aws_s3_bucket.packages.arn}/*"]
+  }
+
+  statement {
+    sid       = "PackagesBucketList"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.packages.arn]
   }
 }
 

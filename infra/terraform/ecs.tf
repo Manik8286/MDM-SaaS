@@ -65,12 +65,24 @@ resource "aws_ecs_task_definition" "api" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "SQS_COMMAND_QUEUE_URL", value = aws_sqs_queue.commands.url },
         { name = "MDM_SERVER_URL", value = "https://${var.domain_name}" },
+        { name = "MDM_DEVICE_URL", value = "https://${var.domain_name}:8443" },
         { name = "APNS_USE_SANDBOX", value = tostring(var.apns_use_sandbox) },
         { name = "MIGRATE", value = "1" },
         { name = "DB_HOST", value = aws_db_instance.main.address },
         { name = "DB_PORT", value = "5432" },
         { name = "DB_NAME", value = "mdmdb" },
         { name = "DB_USER", value = "mdm" },
+        { name = "PACKAGES_S3_BUCKET", value = aws_s3_bucket.packages.bucket },
+        { name = "SMTP_HOST", value = var.smtp_host },
+        { name = "SMTP_PORT", value = tostring(var.smtp_port) },
+        { name = "SMTP_USERNAME", value = var.smtp_username },
+        { name = "SMTP_USE_TLS", value = "true" },
+        { name = "SMTP_FROM_EMAIL", value = var.smtp_from_email },
+        { name = "SMTP_FROM_NAME", value = var.smtp_from_name },
+        { name = "STRIPE_STARTER_PRICE_ID", value = var.stripe_starter_price_id },
+        { name = "STRIPE_PRO_PRICE_ID", value = var.stripe_pro_price_id },
+        { name = "APP_BASE_URL", value = var.dashboard_url },
+        { name = "DASHBOARD_URL", value = var.dashboard_url },
       ]
 
       secrets = [
@@ -101,6 +113,18 @@ resource "aws_ecs_task_definition" "api" {
         {
           name      = "DEVICE_IDENTITY_P12_B64"
           valueFrom = aws_secretsmanager_secret.device_identity_p12.arn
+        },
+        {
+          name      = "STRIPE_SECRET_KEY"
+          valueFrom = aws_secretsmanager_secret.stripe_secret_key.arn
+        },
+        {
+          name      = "STRIPE_WEBHOOK_SECRET"
+          valueFrom = aws_secretsmanager_secret.stripe_webhook_secret.arn
+        },
+        {
+          name      = "SMTP_PASSWORD"
+          valueFrom = aws_secretsmanager_secret.smtp_password.arn
         },
       ]
 
@@ -242,6 +266,7 @@ resource "aws_ecs_service" "api" {
   depends_on = [
     aws_lb_listener.https,
     aws_lb_listener.http_redirect,
+    aws_lb_listener.mtls,
   ]
 
   tags = {

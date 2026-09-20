@@ -25,6 +25,15 @@ resource "aws_security_group" "alb" {
     ipv6_cidr_blocks = ["::/0"]
   }
 
+  ingress {
+    description      = "mTLS device endpoints (Apple MDM check-in/connect) from internet"
+    from_port        = 8443
+    to_port          = 8443
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -128,6 +137,40 @@ resource "aws_lb_listener" "https" {
 
   tags = {
     Name = "${local.common_name}-https-listener"
+  }
+}
+
+# ---------------------------------------------------------------------------
+# mTLS listener (port 8443) - Apple MDM device endpoints only
+#
+# Separate from the port-443 listener because mutual_authentication applies
+# to the whole listener: every caller on this port must present a client
+# cert, which browsers/dashboard traffic never will. Mode "passthrough"
+# means the ALB requests a cert but does not validate it against a trust
+# store — app/core/mtls.py does that validation itself (against
+# MDM_CA_CERT_PATH), the same way it would behind an nginx reverse proxy.
+# Forwards to the same target group/app; only the two endpoints that depend
+# on require_device_cert() actually enforce the cert.
+# ---------------------------------------------------------------------------
+
+resource "aws_lb_listener" "mtls" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = 8443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = aws_acm_certificate_validation.main.certificate_arn
+
+  mutual_authentication {
+    mode = "passthrough"
+  }
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+
+  tags = {
+    Name = "${local.common_name}-mtls-listener"
   }
 }
 

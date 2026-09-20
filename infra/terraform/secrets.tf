@@ -148,3 +148,69 @@ resource "aws_secretsmanager_secret_version" "device_identity_p12" {
     ignore_changes = [secret_string]
   }
 }
+
+# ---------------------------------------------------------------------------
+# 7. Stripe secret key (live mode)
+# ---------------------------------------------------------------------------
+
+resource "aws_secretsmanager_secret" "stripe_secret_key" {
+  name        = "${local.common_name}/stripe-secret-key"
+  description = "Stripe live-mode secret key"
+
+  tags = {
+    Name = "${local.common_name}/stripe-secret-key"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "stripe_secret_key" {
+  secret_id     = aws_secretsmanager_secret.stripe_secret_key.id
+  secret_string = "REPLACE_WITH_STRIPE_LIVE_SECRET_KEY"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 8. Stripe webhook signing secret (live mode)
+# ---------------------------------------------------------------------------
+
+resource "aws_secretsmanager_secret" "stripe_webhook_secret" {
+  name        = "${local.common_name}/stripe-webhook-secret"
+  description = "Stripe live-mode webhook signing secret"
+
+  tags = {
+    Name = "${local.common_name}/stripe-webhook-secret"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "stripe_webhook_secret" {
+  secret_id     = aws_secretsmanager_secret.stripe_webhook_secret.id
+  secret_string = "REPLACE_WITH_STRIPE_LIVE_WEBHOOK_SECRET"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 9. SMTP auth password
+# ---------------------------------------------------------------------------
+
+resource "aws_secretsmanager_secret" "smtp_password" {
+  name        = "${local.common_name}/smtp-password"
+  description = "SMTP auth password (e.g. SES SMTP secret access key)"
+
+  tags = {
+    Name = "${local.common_name}/smtp-password"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "smtp_password" {
+  secret_id     = aws_secretsmanager_secret.smtp_password.id
+  secret_string = "REPLACE_WITH_SMTP_PASSWORD"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

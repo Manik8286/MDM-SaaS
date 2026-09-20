@@ -1,10 +1,16 @@
 """
 mTLS client certificate validation for Apple MDM endpoints.
 
-In production, a reverse proxy (nginx/traefik) terminates TLS and forwards
-the verified client cert as a PEM-encoded header:
-  X-SSL-Client-Cert:   <URL-encoded PEM certificate>
-  X-SSL-Client-Verify: SUCCESS | FAILED | NONE
+In production, the client cert reaches this app as a PEM-encoded header, set
+by whichever layer terminates the client TLS handshake:
+
+  - AWS ALB, mutual-TLS listener in "passthrough" mode (our deployment):
+      X-Amzn-Mtls-Clientcert: <URL-encoded PEM certificate>
+    ALB requests a client cert but does not itself validate it — this module
+    does that, against MDM_CA_CERT_PATH, exactly as it would for a proxy.
+  - A reverse proxy (nginx/traefik), if used instead:
+      X-SSL-Client-Cert:   <URL-encoded PEM certificate>
+      X-SSL-Client-Verify: SUCCESS | FAILED | NONE
 
 In development, cert validation is skipped and a warning is logged.
 
@@ -28,9 +34,17 @@ from app.core.config import get_settings
 log = logging.getLogger(__name__)
 settings = get_settings()
 
-# Header names set by nginx ssl_client_certificate + proxy_set_header
-_CERT_HEADER = "x-ssl-client-cert"
-_VERIFY_HEADER = "x-ssl-client-verify"
+# Checked in order — ALB's mTLS passthrough header first, then nginx-style.
+_CERT_HEADERS = ("x-amzn-mtls-clientcert", "x-ssl-client-cert")
+_VERIFY_HEADER = "x-ssl-client-verify"  # only ever set by an nginx-style proxy
+
+
+def _get_cert_header(request: Request) -> str | None:
+    for name in _CERT_HEADERS:
+        value = request.headers.get(name)
+        if value:
+            return value
+    return None
 
 
 @dataclass
@@ -86,7 +100,7 @@ async def require_device_cert(request: Request) -> DeviceCert:
     """
     is_dev = not settings.is_production
 
-    cert_header = request.headers.get(_CERT_HEADER)
+    cert_header = _get_cert_header(request)
     verify_status = request.headers.get(_VERIFY_HEADER, "NONE").upper()
 
     # In dev without a proxy, log and return a sentinel

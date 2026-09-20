@@ -3,8 +3,9 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+      source = "hashicorp/aws"
+      # >= 5.39 required: aws_lb_listener.mutual_authentication (ALB mTLS)
+      version = ">= 5.39, < 6.0"
     }
     random = {
       source  = "hashicorp/random"

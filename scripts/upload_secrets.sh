@@ -53,6 +53,27 @@ put_secret() {
     echo "[ OK] ${secret_name} updated."
 }
 
+# Helper function — put a literal string value into a secret (for
+# non-file secrets like API keys, read from an env var)
+put_secret_string() {
+    local secret_name="$1"
+    local value="$2"
+
+    if [ -z "${value}" ]; then
+        echo "[SKIP] Value not set (secret ${secret_name} not updated)"
+        return 0
+    fi
+
+    echo "[...] Uploading value → secret: ${secret_name}"
+
+    aws secretsmanager put-secret-value \
+        --region "${AWS_REGION}" \
+        --secret-id "${secret_name}" \
+        --secret-string "${value}"
+
+    echo "[ OK] ${secret_name} updated."
+}
+
 # ---------------------------------------------------------------------------
 # Upload each secret
 # ---------------------------------------------------------------------------
@@ -62,6 +83,15 @@ put_secret "${PREFIX}/apns-cert"       "${CERT_DIR}/apns.pem"
 put_secret "${PREFIX}/apns-key"        "${CERT_DIR}/apns.key"
 put_secret "${PREFIX}/mdm-signing-cert" "${CERT_DIR}/mdm_signing.pem"
 put_secret "${PREFIX}/mdm-signing-key"  "${CERT_DIR}/mdm_signing.key"
+put_secret "${PREFIX}/device-identity-p12" "${CERT_DIR}/device_identity.p12"
+
+echo ""
+echo "Non-file secrets — pass these as env vars to upload them, e.g.:"
+echo "  STRIPE_SECRET_KEY=sk_live_... STRIPE_WEBHOOK_SECRET=whsec_... SMTP_PASSWORD=... \\"
+echo "    APP_NAME=${APP_NAME} AWS_REGION=${AWS_REGION} ENVIRONMENT=${ENVIRONMENT} bash scripts/upload_secrets.sh"
+put_secret_string "${PREFIX}/stripe-secret-key"     "${STRIPE_SECRET_KEY:-}"
+put_secret_string "${PREFIX}/stripe-webhook-secret" "${STRIPE_WEBHOOK_SECRET:-}"
+put_secret_string "${PREFIX}/smtp-password"         "${SMTP_PASSWORD:-}"
 
 echo ""
 echo "=================================================="

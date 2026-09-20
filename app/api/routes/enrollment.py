@@ -187,13 +187,18 @@ async def download_enrollment_profile(
         html = _enrollment_landing_page(tenant.name, profile_url)
         return Response(content=html, media_type="text/html", headers={"ngrok-skip-browser-warning": "1"})
 
-    # Build and optionally sign the .mobileconfig
+    # Build and optionally sign the .mobileconfig.
+    # server_url/checkin_url use mdm_device_base_url — in production this is
+    # the ALB's mutual-TLS listener, a separate port from the plain HTTPS one
+    # used for enrollment/dashboard traffic (that listener requires every
+    # caller to present a client cert, which browsers don't have).
     push_topic = tenant.apns_push_topic or f"com.mdmsaas.mdm.{tenant.slug}"
     base_url = settings.mdm_server_url.rstrip("/")
+    device_base_url = settings.mdm_device_base_url.rstrip("/")
     profile_xml = build_mdm_enrollment_profile(
         tenant=tenant,
-        server_url=f"{base_url}/mdm/apple/connect",
-        checkin_url=f"{base_url}/mdm/apple/checkin",
+        server_url=f"{device_base_url}/mdm/apple/connect",
+        checkin_url=f"{device_base_url}/mdm/apple/checkin",
         push_topic=push_topic,
     )
 

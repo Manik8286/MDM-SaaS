@@ -11,9 +11,11 @@ GET    /packages/{id}/download — download file (agent-token OR JWT auth)
 import os
 import pathlib
 import logging
+import tempfile
+import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -31,11 +33,25 @@ UPLOAD_DIR = pathlib.Path("/app/uploads/packages")
 ALLOWED_EXTENSIONS = {".pkg", ".dmg"}
 MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
 
+# file_path values for S3-backed packages are stored as "s3://<bucket>/<key>"
+# so existing rows (local paths, no scheme) keep working after this is
+# enabled — storage mode is a deployment setting, not a per-row choice.
+_S3_PREFIX = "s3://"
+
 
 def _upload_dir(tenant_id: str) -> pathlib.Path:
     d = UPLOAD_DIR / tenant_id
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _s3_client():
+    import boto3
+    return boto3.client("s3", region_name=settings.aws_region)
+
+
+def _s3_key(tenant_id: str, safe_name: str) -> str:
+    return f"packages/{tenant_id}/{safe_name}"
 
 
 # ---------------------------------------------------------------------------
@@ -56,18 +72,35 @@ async def upload_package(
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only .pkg and .dmg files are allowed")
 
-    pkg_id = __import__("uuid").uuid4().hex
+    pkg_id = uuid.uuid4().hex
     safe_name = f"{pkg_id}{suffix}"
-    dest = _upload_dir(tenant.id) / safe_name
 
     size = 0
-    with dest.open("wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_FILE_SIZE:
-                dest.unlink(missing_ok=True)
-                raise HTTPException(status_code=413, detail="File too large (max 4 GB)")
-            f.write(chunk)
+    if settings.packages_s3_bucket:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="File too large (max 4 GB)")
+                tmp.write(chunk)
+            tmp.close()
+            key = _s3_key(tenant.id, safe_name)
+            _s3_client().upload_file(tmp.name, settings.packages_s3_bucket, key)
+            file_path = f"{_S3_PREFIX}{settings.packages_s3_bucket}/{key}"
+        finally:
+            tmp.close()
+            os.unlink(tmp.name)
+    else:
+        dest = _upload_dir(tenant.id) / safe_name
+        with dest.open("wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_SIZE:
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="File too large (max 4 GB)")
+                f.write(chunk)
+        file_path = str(dest)
 
     pkg = SoftwarePackage(
         tenant_id=tenant.id,
@@ -75,7 +108,7 @@ async def upload_package(
         version=version or None,
         description=description or None,
         filename=file.filename,
-        file_path=str(dest),
+        file_path=file_path,
         file_size=size,
         pkg_type=suffix.lstrip("."),
         uploaded_by_id=user.id,
@@ -124,7 +157,11 @@ async def delete_package(
     pkg = result.scalar_one_or_none()
     if not pkg:
         raise HTTPException(status_code=404, detail="Package not found")
-    pathlib.Path(pkg.file_path).unlink(missing_ok=True)
+    if pkg.file_path.startswith(_S3_PREFIX):
+        bucket, _, key = pkg.file_path[len(_S3_PREFIX):].partition("/")
+        _s3_client().delete_object(Bucket=bucket, Key=key)
+    else:
+        pathlib.Path(pkg.file_path).unlink(missing_ok=True)
     await db.delete(pkg)
 
 
@@ -172,6 +209,20 @@ async def download_package(
     pkg = result.scalar_one_or_none()
     if not pkg:
         raise HTTPException(status_code=404, detail="Package not found")
+
+    if pkg.file_path.startswith(_S3_PREFIX):
+        bucket, _, key = pkg.file_path[len(_S3_PREFIX):].partition("/")
+        url = _s3_client().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket,
+                "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{pkg.filename}"',
+                "ResponseContentType": "application/octet-stream",
+            },
+            ExpiresIn=300,
+        )
+        return RedirectResponse(url)
 
     path = pathlib.Path(pkg.file_path)
     if not path.exists():

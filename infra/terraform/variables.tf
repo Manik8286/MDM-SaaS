@@ -85,3 +85,60 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# Terraform does not deploy the Next.js dashboard (see infra/terraform's
+# README note) — this must point wherever it ends up hosted (Vercel, its own
+# ECS service, etc). Used for Stripe checkout redirects and OAuth callbacks.
+# ---------------------------------------------------------------------------
+
+variable "dashboard_url" {
+  description = "Public URL of the dashboard frontend, e.g. https://app.mdm.company.io"
+  type        = string
+}
+
+# ---------------------------------------------------------------------------
+# Transactional email (SMTP) - password reset, trial reminders, welcome mail
+# ---------------------------------------------------------------------------
+
+variable "smtp_host" {
+  description = "SMTP server hostname (e.g. Amazon SES SMTP endpoint)"
+  type        = string
+}
+
+variable "smtp_port" {
+  description = "SMTP server port"
+  type        = number
+  default     = 587
+}
+
+variable "smtp_username" {
+  description = "SMTP auth username (e.g. an SES SMTP IAM user's access key ID)"
+  type        = string
+}
+
+variable "smtp_from_email" {
+  description = "From address for transactional email — must be a verified sender identity"
+  type        = string
+}
+
+variable "smtp_from_name" {
+  description = "From display name for transactional email"
+  type        = string
+  default     = "MDM Console"
+}
+
+# ---------------------------------------------------------------------------
+# Stripe billing
+# ---------------------------------------------------------------------------
+
+variable "stripe_starter_price_id" {
+  description = "Stripe live-mode Price ID for the Starter plan"
+  type        = string
+}
+
+variable "stripe_pro_price_id" {
+  description = "Stripe live-mode Price ID for the Professional plan"
+  type        = string
+}
