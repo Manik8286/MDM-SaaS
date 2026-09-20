@@ -3,13 +3,16 @@ Public self-serve tenant signup.
 
 POST /api/v1/signup
 - No auth required
-- Creates Tenant (trial plan, 5-device limit, 14-day trial)
-- Creates first User (role=owner)
-- Returns a JWT so the user lands straight in the dashboard
+- Creates Tenant in a "pending" billing state (no devices allowed yet) and
+  the first User (role=owner)
+- Returns a JWT immediately so the frontend can call POST /billing/checkout
+  next, which starts a 5-day Stripe trial on the chosen plan. The tenant is
+  only activated (device limit unlocked) once the Stripe webhook confirms
+  the checkout session / subscription — see app/api/routes/billing.py
 """
 import logging
 import re
-from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, field_validator
@@ -20,12 +23,10 @@ from app.core.limiter import limiter
 from app.core.security import create_access_token, hash_password
 from app.db.base import get_db
 from app.db.models import Tenant, User
+from app.services.email import send_welcome_email
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-
-TRIAL_DAYS = 14
-TRIAL_DEVICE_LIMIT = 5
 
 
 def _slugify(name: str) -> str:
@@ -39,6 +40,7 @@ class SignupRequest(BaseModel):
     org_name: str
     email: EmailStr
     password: str
+    plan: Literal["starter", "professional"] = "starter"
 
     @field_validator("org_name")
     @classmethod
@@ -61,6 +63,7 @@ class SignupResponse(BaseModel):
     token_type: str = "bearer"
     tenant_id: str
     tenant_slug: str
+    plan: str
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=201)
@@ -85,16 +88,17 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
         slug = f"{base_slug}-{suffix}"
         suffix += 1
 
-    trial_ends = datetime.utcnow() + timedelta(days=TRIAL_DAYS)
-
+    # Tenant starts "pending" — no devices can be enrolled until the Stripe
+    # checkout (started right after this call returns) confirms the card and
+    # the webhook activates the plan with its 5-day trial.
     tenant = Tenant(
         name=body.org_name.strip(),
         slug=slug,
-        plan="trial",
+        plan=body.plan,
         status="active",
-        billing_status="trialing",
-        plan_device_limit=TRIAL_DEVICE_LIMIT,
-        trial_ends_at=trial_ends,
+        billing_status="pending",
+        plan_device_limit=0,
+        trial_ends_at=None,
     )
     db.add(tenant)
     await db.flush()  # get tenant.id
@@ -111,10 +115,13 @@ async def signup(body: SignupRequest, request: Request, db: AsyncSession = Depen
 
     token = create_access_token(subject=user.id, tenant_id=tenant.id, role=user.role)
 
-    log.info("New tenant signed up: slug=%s owner=%s", slug, body.email)
+    log.info("New tenant signed up: slug=%s owner=%s plan=%s", slug, body.email, body.plan)
+
+    await send_welcome_email(body.email, tenant.name)
 
     return SignupResponse(
         access_token=token,
         tenant_id=tenant.id,
         tenant_slug=slug,
+        plan=body.plan,
     )

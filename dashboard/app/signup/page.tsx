@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { signup, setToken, setApiUrl, getApiUrl } from "@/lib/api";
-import { Shield, CheckCircle, Loader2, Settings } from "lucide-react";
+import { signup, setToken, startCheckout, setApiUrl, getApiUrl } from "@/lib/api";
+import { Shield, CheckCircle, Loader2, Settings, CreditCard } from "lucide-react";
 
 function getDevUrl() {
   if (typeof window === "undefined") return "http://localhost:8000";
@@ -12,18 +12,24 @@ function getDevUrl() {
 }
 
 const TRIAL_FEATURES = [
-  "5 devices — free for 14 days",
+  "5-day free trial on any plan",
   "Apple MDM enrollment & remote actions",
   "Microsoft Entra ID + PSSO",
   "Compliance & patch management",
-  "No credit card required",
+  "Cancel anytime during the trial",
 ];
 
-export default function SignupPage() {
-  const router = useRouter();
+const PLAN_OPTIONS = [
+  { key: "starter" as const, name: "Starter", price: 199, devices: 25 },
+  { key: "professional" as const, name: "Professional", price: 499, devices: 100 },
+];
+
+function SignupForm() {
+  const searchParams = useSearchParams();
   const [orgName, setOrgName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [plan, setPlan] = useState<"starter" | "professional">("starter");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [apiUrlInput, setApiUrlInput] = useState("");
@@ -31,17 +37,26 @@ export default function SignupPage() {
 
   useEffect(() => { setApiUrlInput(getApiUrl()); }, []);
 
+  useEffect(() => {
+    const requested = searchParams.get("plan");
+    if (requested === "starter" || requested === "professional") {
+      setPlan(requested);
+    }
+  }, [searchParams]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const result = await signup(orgName, email, password);
+      const result = await signup(orgName, email, password, plan);
       setToken(result.access_token);
-      router.push("/devices");
+      // Account is created but locked (no devices) until Stripe confirms
+      // the card — send the browser straight to hosted Checkout to start
+      // the 5-day trial.
+      await startCheckout(plan);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Signup failed");
-    } finally {
       setLoading(false);
     }
   }
@@ -97,7 +112,7 @@ export default function SignupPage() {
               <Settings size={11} /> API
             </button>
           </div>
-          <p className="text-sm text-zinc-500 mb-4">No credit card required · 14 days · 5 devices</p>
+          <p className="text-sm text-zinc-500 mb-4">5 days free, then billed monthly · cancel anytime</p>
 
           {showApiConfig && (
             <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 space-y-2">
@@ -126,6 +141,31 @@ export default function SignupPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-2">
+                Choose a plan
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {PLAN_OPTIONS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => setPlan(p.key)}
+                    className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                      plan === p.key
+                        ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900"
+                        : "border-zinc-200 hover:border-zinc-300"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-zinc-900">{p.name}</p>
+                    <p className="text-xs text-zinc-500">
+                      ${p.price}/mo · {p.devices} devices
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1">
                 Organisation name
@@ -181,13 +221,16 @@ export default function SignupPage() {
               disabled={loading}
               className="flex items-center justify-center gap-2 w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : null}
-              {loading ? "Creating account…" : "Start free trial"}
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+              {loading ? "Redirecting to secure checkout…" : "Continue to payment"}
             </button>
           </form>
 
           <p className="mt-4 text-xs text-zinc-400 text-center">
-            By signing up you agree to our Terms of Service and Privacy Policy.
+            You&apos;ll enter your card on Stripe&apos;s secure checkout. Nothing is charged for 5 days —
+            cancel anytime before then and you won&apos;t be billed. By continuing you agree to our{" "}
+            <Link href="/terms" className="underline hover:text-zinc-600">Terms of Service</Link> and{" "}
+            <Link href="/privacy" className="underline hover:text-zinc-600">Privacy Policy</Link>.
           </p>
 
           <p className="mt-6 text-sm text-zinc-500 text-center">
@@ -199,5 +242,13 @@ export default function SignupPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   );
 }

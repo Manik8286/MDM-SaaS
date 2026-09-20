@@ -2,10 +2,22 @@
 Stripe billing routes.
 
 GET  /billing/plans            — public plan catalogue
-POST /billing/checkout         — create Stripe Checkout Session (upgrade flow)
+POST /billing/checkout         — create Stripe Checkout Session (signup + upgrade flow)
 GET  /billing/portal           — Stripe Customer Portal link (manage subscription)
 GET  /billing/status           — current plan + subscription info for dashboard
 POST /billing/webhook          — Stripe webhook handler (raw body, no JWT)
+
+Signup flow (card required, 5-day free trial):
+  1. POST /api/v1/signup creates the tenant in billing_status="pending" with
+     plan_device_limit=0 — no devices can be enrolled yet.
+  2. Frontend immediately calls POST /billing/checkout?plan=... which creates
+     a Stripe Checkout Session with subscription_data.trial_period_days=5.
+     The customer enters their card on Stripe's hosted page; no charge yet.
+  3. Stripe sends checkout.session.completed → we activate the tenant with
+     billing_status="trialing" and trial_ends_at 5 days out.
+  4. After 5 days, Stripe auto-charges the card and sends
+     customer.subscription.updated (status=active); if the card fails,
+     invoice.payment_failed marks the tenant past_due.
 
 Stripe test mode setup (no account needed to start):
   1. Create free account at stripe.com
@@ -38,6 +50,10 @@ log = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/billing")
 
+# Card is collected up front at signup; Stripe holds the charge for this many
+# days before the subscription auto-activates and billing starts.
+TRIAL_PERIOD_DAYS = 5
+
 # ── Plan catalogue ────────────────────────────────────────────────────────────
 
 PLANS = {
@@ -45,8 +61,8 @@ PLANS = {
         "name": "Trial",
         "price_monthly": 0,
         "device_limit": 5,
-        "duration_days": 14,
-        "features": ["5 devices", "14-day trial", "All features"],
+        "duration_days": TRIAL_PERIOD_DAYS,
+        "features": ["5-day free trial", "All features", "Card required"],
         "stripe_price_id": None,
     },
     "starter": {
@@ -156,6 +172,7 @@ async def create_checkout_session(
         "metadata": {"tenant_id": tenant.id, "plan": plan},
         "subscription_data": {
             "metadata": {"tenant_id": tenant.id, "plan": plan},
+            "trial_period_days": TRIAL_PERIOD_DAYS,
         },
         "allow_promotion_codes": True,
     })
@@ -228,6 +245,12 @@ async def stripe_webhook(
     return {"received": True}
 
 
+def _epoch_to_dt(epoch: int | None) -> datetime | None:
+    if not epoch:
+        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).replace(tzinfo=None)
+
+
 async def _handle_event(event: stripe.Event, db: AsyncSession) -> None:
     etype = event["type"]
     obj = event["data"]["object"]
@@ -239,7 +262,22 @@ async def _handle_event(event: stripe.Event, db: AsyncSession) -> None:
         subscription_id = obj.get("subscription")
         if not tenant_id:
             return
-        await _activate_plan(db, tenant_id, plan, customer_id, subscription_id)
+
+        # The checkout session itself doesn't carry trial/status info —
+        # pull the subscription it created to find out whether we're now
+        # in the 5-day trial or (no trial configured) already active.
+        sub_status = "active"
+        trial_ends_at = None
+        if subscription_id:
+            client = _stripe_client()
+            subscription = client.subscriptions.retrieve(subscription_id)
+            sub_status = subscription.status
+            trial_ends_at = _epoch_to_dt(subscription.trial_end)
+
+        await _activate_plan(
+            db, tenant_id, plan, customer_id, subscription_id,
+            billing_status=sub_status, trial_ends_at=trial_ends_at,
+        )
 
     elif etype == "customer.subscription.updated":
         tenant_id = obj.get("metadata", {}).get("tenant_id")
@@ -247,36 +285,38 @@ async def _handle_event(event: stripe.Event, db: AsyncSession) -> None:
         sub_status = obj.get("status", "active")
         if not tenant_id:
             return
-        billing_status = "active" if sub_status == "active" else sub_status
         plan_limit = PLANS.get(plan, PLANS["starter"])["device_limit"]
         await db.execute(
             update(Tenant)
             .where(Tenant.id == tenant_id)
             .values(
                 plan=plan,
-                billing_status=billing_status,
+                billing_status=sub_status,
                 plan_device_limit=plan_limit,
+                trial_ends_at=_epoch_to_dt(obj.get("trial_end")),
+                trial_reminder_sent_at=None,
                 stripe_subscription_id=obj.get("id"),
             )
         )
-        log.info("Subscription updated tenant=%s plan=%s status=%s", tenant_id, plan, billing_status)
+        log.info("Subscription updated tenant=%s plan=%s status=%s", tenant_id, plan, sub_status)
 
     elif etype == "customer.subscription.deleted":
         tenant_id = obj.get("metadata", {}).get("tenant_id")
         if not tenant_id:
             return
-        # Downgrade to trial limits (don't delete data)
+        # Card is required for any device access in this model — cancellation
+        # locks out enrollment (don't delete data) until they resubscribe.
         await db.execute(
             update(Tenant)
             .where(Tenant.id == tenant_id)
             .values(
-                plan="trial",
                 billing_status="canceled",
-                plan_device_limit=5,
+                plan_device_limit=0,
+                trial_ends_at=None,
                 stripe_subscription_id=None,
             )
         )
-        log.info("Subscription canceled — tenant=%s downgraded to trial", tenant_id)
+        log.info("Subscription canceled — tenant=%s locked out", tenant_id)
 
     elif etype == "invoice.payment_failed":
         customer_id = obj.get("customer")
@@ -296,6 +336,8 @@ async def _activate_plan(
     plan: str,
     customer_id: str | None,
     subscription_id: str | None,
+    billing_status: str = "active",
+    trial_ends_at: datetime | None = None,
 ) -> None:
     plan_meta = PLANS.get(plan, PLANS["starter"])
     await db.execute(
@@ -303,11 +345,15 @@ async def _activate_plan(
         .where(Tenant.id == tenant_id)
         .values(
             plan=plan,
-            billing_status="active",
+            billing_status=billing_status,
             plan_device_limit=plan_meta["device_limit"],
-            trial_ends_at=None,
+            trial_ends_at=trial_ends_at,
+            trial_reminder_sent_at=None,
             stripe_customer_id=customer_id,
             stripe_subscription_id=subscription_id,
         )
     )
-    log.info("Plan activated tenant=%s plan=%s customer=%s", tenant_id, plan, customer_id)
+    log.info(
+        "Plan activated tenant=%s plan=%s status=%s customer=%s",
+        tenant_id, plan, billing_status, customer_id,
+    )

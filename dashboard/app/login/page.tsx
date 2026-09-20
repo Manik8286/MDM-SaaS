@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { setToken, setApiUrl, getApiUrl, login, validate2fa } from "@/lib/api";
 
 function getDevUrl() {
@@ -196,7 +197,12 @@ function LoginForm() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-600 mb-1">Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-zinc-600">Password</label>
+                <Link href="/forgot-password" className="text-xs text-zinc-500 hover:text-zinc-700">
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 type="password"
                 value={password}

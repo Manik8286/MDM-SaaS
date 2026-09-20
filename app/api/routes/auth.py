@@ -3,24 +3,25 @@ import hmac
 import io
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Cookie
 from fastapi.responses import RedirectResponse, HTMLResponse, Response
 from jose import jwt as jose_jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.limiter import limiter
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.core.deps import get_current_user, bearer
 from app.db.base import get_db
-from app.db.models import Tenant, User, Device, RevokedToken
+from app.db.models import Tenant, User, Device, RevokedToken, PasswordResetToken
 from app.services.audit import write_audit
+from app.services.email import send_password_reset_email
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -92,6 +93,79 @@ async def logout(
         actor_id=user.id, resource_id=user.id,
         ip_address=request.client.host if request.client else None,
     )
+
+
+# ── Password reset ────────────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
+
+RESET_TOKEN_TTL_HOURS = 1
+
+
+@router.post("/forgot-password", status_code=202)
+@limiter.limit("5/minute")
+async def forgot_password(body: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Always returns the same generic response regardless of whether the email
+    exists — prevents using this endpoint to enumerate registered accounts.
+    """
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user and user.status == "active":
+        token_str = secrets.token_urlsafe(32)
+        db.add(PasswordResetToken(
+            user_id=user.id,
+            token=token_str,
+            expires_at=datetime.utcnow() + timedelta(hours=RESET_TOKEN_TTL_HOURS),
+        ))
+        await db.flush()
+        reset_url = f"{settings.dashboard_url.rstrip('/')}/reset-password?token={token_str}"
+        await send_password_reset_email(user.email, reset_url)
+        log.info("Password reset requested for user=%s", user.id)
+
+    return {"message": "If an account exists for that email, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+@limiter.limit("10/minute")
+async def reset_password(body: ResetPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == body.token))
+    record = result.scalar_one_or_none()
+    if not record or record.used or record.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    user_result = await db.execute(select(User).where(User.id == record.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user or user.status != "active":
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    user.hashed_password = hash_password(body.new_password)
+    record.used = True
+    await db.flush()
+
+    await write_audit(
+        db, user.tenant_id, "auth.password_reset", "user",
+        actor_id=user.id, resource_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    log.info("Password reset completed for user=%s", user.id)
+
+    return {"message": "Password updated. You can now sign in."}
 
 
 # ── TOTP 2FA endpoints ────────────────────────────────────────────────────────

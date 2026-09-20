@@ -57,6 +57,20 @@ export async function login(email: string, password: string) {
   });
 }
 
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  return request("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
 export async function validate2fa(temp_token: string, totp_code: string) {
   return request<{ access_token: string }>("/auth/2fa/validate", {
     method: "POST",
@@ -826,11 +840,16 @@ export function updateProfile(
 
 // ── Signup ─────────────────────────────────────────────────────────────────
 
-export async function signup(orgName: string, email: string, password: string): Promise<{ access_token: string; tenant_id: string; tenant_slug: string }> {
+export async function signup(
+  orgName: string,
+  email: string,
+  password: string,
+  plan: "starter" | "professional",
+): Promise<{ access_token: string; tenant_id: string; tenant_slug: string; plan: string }> {
   const res = await fetch(`${getApiBase()}/api/v1/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ org_name: orgName, email, password }),
+    body: JSON.stringify({ org_name: orgName, email, password, plan }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

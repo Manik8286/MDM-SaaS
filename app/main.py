@@ -43,11 +43,11 @@ configure_logging(level=settings.log_level, json_logs=settings.is_production)
 log = logging.getLogger(__name__)
 
 
-def _run_migrations() -> None:
+def _run_alembic(*args: str) -> None:
     """
-    Run alembic upgrade head in a subprocess.
+    Run an alembic subcommand in a subprocess.
 
-    We cannot call alembic_command.upgrade() directly here because env.py uses
+    We cannot call alembic_command directly here because env.py uses
     asyncio.run(), which raises RuntimeError when a loop is already running
     (FastAPI's lifespan context). A subprocess gets its own clean event loop.
     """
@@ -57,7 +57,7 @@ def _run_migrations() -> None:
 
     ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", os.path.abspath(ini_path), "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "-c", os.path.abspath(ini_path), *args],
         capture_output=True,
         text=True,
     )
@@ -65,26 +65,43 @@ def _run_migrations() -> None:
         for line in result.stdout.splitlines():
             log.info("alembic: %s", line)
     if result.returncode != 0:
-        log.error("Alembic migration failed:\n%s", result.stderr)
-        raise RuntimeError("Alembic migration failed — startup aborted")
-    log.info("Alembic migrations applied")
+        log.error("Alembic %s failed:\n%s", " ".join(args), result.stderr)
+        raise RuntimeError(f"Alembic {' '.join(args)} failed — startup aborted")
+    log.info("Alembic %s applied", " ".join(args))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting MDM SaaS API (env=%s)", settings.environment)
 
-    # Run migrations first, then let create_all handle any tables not yet in Alembic
-    _run_migrations()
+    # The first Alembic migration (8c183e249773) is a no-op — it assumes the base
+    # schema already exists. On a brand-new database there is no alembic_version
+    # table yet, so create the full current schema via create_all() and stamp
+    # Alembic as up to date instead of replaying migrations that expect existing
+    # tables. On a database Alembic already tracks, upgrade head as usual, then
+    # create_all() as a safety net for any table not yet captured by a migration.
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        is_fresh = (await conn.execute(text("SELECT to_regclass('public.alembic_version')"))).scalar() is None
+
+    if is_fresh:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        _run_alembic("stamp", "head")
+    else:
+        _run_alembic("upgrade", "head")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     from app.services.auto_revoke import auto_revoke_loop
     revoke_task = asyncio.create_task(auto_revoke_loop())
 
+    from app.services.trial_reminder import trial_reminder_loop
+    trial_reminder_task = asyncio.create_task(trial_reminder_loop())
+
     yield
 
     revoke_task.cancel()
+    trial_reminder_task.cancel()
     await engine.dispose()
     log.info("API shutdown complete")
 

@@ -33,6 +33,7 @@ class Tenant(Base):
     billing_status: Mapped[str] = mapped_column(String(50), default="trialing")
     plan_device_limit: Mapped[int] = mapped_column(Integer, default=5)
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime)
+    trial_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
 
@@ -159,6 +160,17 @@ class EnrollmentToken(Base):
     reusable: Mapped[bool] = mapped_column(Boolean, default=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

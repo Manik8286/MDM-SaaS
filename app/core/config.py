@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     # Notifications — optional webhook URL (Slack/Teams/Discord incoming webhook)
     notification_webhook_url: str = ""
 
+    # Transactional email (SMTP) — welcome emails, password reset, trial reminders.
+    # In dev, docker-compose points this at a local Mailpit catcher (no real
+    # delivery); see http://localhost:8025 to view sent mail.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from_email: str = "no-reply@mdmconsole.local"
+    smtp_from_name: str = "MDM Console"
+
     # Stripe billing
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

@@ -167,13 +167,13 @@ export default function SettingsPage() {
           {/* Current plan banner */}
           <div className={`rounded-lg px-4 py-3 mb-5 flex items-center justify-between ${
             billing.billing_status === "active" ? "bg-green-50 border border-green-200" :
-            billing.billing_status === "past_due" ? "bg-red-50 border border-red-200" :
+            billing.billing_status === "past_due" || billing.billing_status === "pending" ? "bg-red-50 border border-red-200" :
             "bg-amber-50 border border-amber-200"
           }`}>
             <div>
               <p className={`text-sm font-semibold ${
                 billing.billing_status === "active" ? "text-green-800" :
-                billing.billing_status === "past_due" ? "text-red-800" : "text-amber-800"
+                billing.billing_status === "past_due" || billing.billing_status === "pending" ? "text-red-800" : "text-amber-800"
               }`}>
                 {billing.plan_name} plan
                 <span className="ml-2 text-xs font-normal opacity-75">
@@ -181,6 +181,7 @@ export default function SettingsPage() {
                     ? `Trial · ${billing.trial_ends_at ? Math.max(0, Math.ceil((new Date(billing.trial_ends_at).getTime() - Date.now()) / 86400000)) : 0} days left`
                     : billing.billing_status === "past_due" ? "Payment past due"
                     : billing.billing_status === "canceled" ? "Canceled"
+                    : billing.billing_status === "pending" ? "Payment setup incomplete"
                     : "Active"}
                 </span>
               </p>
@@ -188,7 +189,17 @@ export default function SettingsPage() {
                 {billing.device_limit} device limit · {billing.features.join(" · ")}
               </p>
             </div>
-            {billing.has_stripe && (
+            {billing.billing_status === "pending" ? (
+              <button
+                onClick={async () => {
+                  try { await startCheckout(billing.plan as "starter" | "professional"); }
+                  catch { /* surfaced via checkoutError on the buttons below */ }
+                }}
+                className="flex items-center gap-1.5 text-xs font-medium text-white bg-zinc-900 rounded-lg px-3 py-1.5 hover:bg-zinc-700 transition-colors"
+              >
+                <CreditCard size={12} /> Complete payment
+              </button>
+            ) : billing.has_stripe && (
               <button
                 onClick={() => openBillingPortal()}
                 className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-zinc-900 border border-zinc-300 rounded-lg px-3 py-1.5 hover:bg-white transition-colors"
