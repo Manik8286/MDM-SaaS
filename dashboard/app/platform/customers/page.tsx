@@ -38,10 +38,10 @@ export default function PlatformCustomersPage() {
   const totalMrr = tenants.filter((t) => t.billing_status === "active").length;
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-8 max-w-6xl mx-auto">
       <h1 className="text-xl font-semibold text-zinc-900 mb-1">Customers</h1>
       <p className="text-sm text-zinc-500 mb-8">
-        Every tenant on the platform, across all organizations — not scoped to your own company.
+        Every tenant on the platform, across all organizations.
       </p>
 
       {error && (

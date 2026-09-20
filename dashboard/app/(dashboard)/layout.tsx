@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText, ShieldCheck, Lock, Package, Users, Layers, Moon, Sun, Building2 } from "lucide-react";
-import { logout, getPlatformTenants } from "@/lib/api";
+import { Monitor, Shield, QrCode, LogOut, Settings, ScrollText, ShieldCheck, Lock, Package, Users, Layers, Moon, Sun } from "lucide-react";
+import { logout } from "@/lib/api";
 
 const nav = [
   { href: "/devices", label: "Devices", icon: Monitor },
@@ -19,25 +19,16 @@ const nav = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const platformNavItem = { href: "/platform/customers", label: "Customers", icon: Building2 };
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [dark, setDark] = useState(false);
-  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && !localStorage.getItem("mdm_token")) {
       router.replace("/login");
     }
   }, [router]);
-
-  useEffect(() => {
-    // Silently ignore failure — 403 is the expected outcome for the vast
-    // majority of users (only the platform owner's email is allowlisted).
-    getPlatformTenants().then(() => setIsPlatformAdmin(true)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("mdm_dark") === "1";
@@ -86,25 +77,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </Link>
             );
           })}
-
-          {isPlatformAdmin && (
-            <>
-              <div className="pt-3 mt-3 border-t border-zinc-200 dark:border-zinc-800">
-                <p className="px-3 pb-1 text-xs font-medium text-zinc-400 uppercase tracking-wide">Platform</p>
-              </div>
-              <Link
-                href={platformNavItem.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  pathname.startsWith(platformNavItem.href)
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                }`}
-              >
-                <platformNavItem.icon size={16} />
-                {platformNavItem.label}
-              </Link>
-            </>
-          )}
         </nav>
 
         <div className="px-3 py-4 border-t border-zinc-200 dark:border-zinc-800">
